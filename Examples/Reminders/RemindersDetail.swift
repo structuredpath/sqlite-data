@@ -81,6 +81,41 @@ class RemindersDetailModel: HashableObject {
       }
     }
   }
+  
+  func debugButtonATapped() async {
+    guard case .remindersList(let remindersList) = detailType else { return }
+    
+    withErrorReporting {
+      try database.write { db in
+        try RemindersList
+          .find(remindersList.id)
+          .update { $0.title = "List changed on A" }
+          .execute(db)
+        
+        try Reminder
+          .insert {
+            Reminder.Draft(
+              remindersListID: remindersList.id,
+              title: "Reminder added on A"
+            )
+          }
+          .execute(db)
+      }
+    }
+  }
+  
+  func debugButtonBTapped() async {
+    guard case .remindersList(let remindersList) = detailType else { return }
+    
+    withErrorReporting {
+      try database.write { db in
+        try RemindersList
+          .find(remindersList.id)
+          .update { $0.title = "List changed on B" }
+          .execute(db)
+      }
+    }
+  }
 
   private func updateQuery() async {
     await withErrorReporting {
@@ -244,6 +279,18 @@ struct RemindersDetailView: View {
       }
       ToolbarItem(placement: .primaryAction) {
         HStack(alignment: .firstTextBaseline) {
+          if model.detailType.is(\.remindersList) {
+            Menu {
+              Button("Rename List & Add Reminder", systemImage: "a.square") {
+                Task { await model.debugButtonATapped() }
+              }
+              Button("Rename List", systemImage: "b.square") {
+                Task { await model.debugButtonBTapped() }
+              }
+            } label: {
+              Image(systemName: "ladybug")
+            }
+          }
           if model.detailType.is(\.remindersList) {
             Button {
               Task { await model.shareButtonTapped() }
