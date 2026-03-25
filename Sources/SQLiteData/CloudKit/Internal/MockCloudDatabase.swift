@@ -12,18 +12,19 @@
     let dataManager = Dependency(\.dataManager)
 
     package struct State {
-      private var lastRecordChangeTag = 0
-      private var lastModificationDate = 0
+      private var changeTagCounter = 0
+      private var modificationDateCounter = 0
       package var storage: [CKRecordZone.ID: Zone] = [:]
       var assets: [AssetID: Data] = [:]
       var deletedRecords: [(CKRecord.ID, CKRecord.RecordType)] = []
-      mutating func nextRecordChangeTag() -> Int {
-        lastRecordChangeTag += 1
-        return lastRecordChangeTag
+      // NB: CloudKit uses base-36 change tags (0…9, a…z, 10…zz, 100…).
+      mutating func nextRecordChangeTag() -> String {
+        defer { changeTagCounter += 1 }
+        return String(changeTagCounter, radix: 36)
       }
       mutating func nextModificationDate() -> Date {
-        lastModificationDate += 1
-        return Date(timeIntervalSinceReferenceDate: TimeInterval(lastModificationDate))
+        defer { modificationDateCounter += 1 }
+        return Date(timeIntervalSinceReferenceDate: TimeInterval(modificationDateCounter))
       }
     }
 

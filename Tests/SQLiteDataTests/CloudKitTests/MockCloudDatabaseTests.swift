@@ -711,11 +711,11 @@
 
         let (results1, _) = try syncEngine.private.database.modifyRecords(saving: [record])
         let saved1 = try #require(try results1[record.recordID]?.get())
-        #expect(saved1.modificationDate == Date(timeIntervalSinceReferenceDate: 1))
+        #expect(saved1.modificationDate == Date(timeIntervalSinceReferenceDate: 0))
 
         let (results2, _) = try syncEngine.private.database.modifyRecords(saving: [saved1])
         let saved2 = try #require(try results2[record.recordID]?.get())
-        #expect(saved2.modificationDate == Date(timeIntervalSinceReferenceDate: 2))
+        #expect(saved2.modificationDate == Date(timeIntervalSinceReferenceDate: 1))
       }
 
       @available(iOS 17, macOS 14, tvOS 17, watchOS 10, *)
