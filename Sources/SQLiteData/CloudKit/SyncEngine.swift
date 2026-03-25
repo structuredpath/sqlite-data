@@ -1928,26 +1928,30 @@
             ownerName: serverRecord.recordID.zoneID.ownerName,
             parentRecordPrimaryKey: serverRecord.parent?.recordID.recordPrimaryKey,
             parentRecordType: serverRecord.parent?.recordID.tableName,
-            lastKnownServerRecord: serverRecord,
-            _lastKnownServerRecordAllFields: serverRecord,
-            share: nil,
-            userModificationTime: serverRecord.userModificationTime
+            userModificationTime: 0
           )
         } onConflict: {
           ($0.recordPrimaryKey, $0.recordType)
         } doUpdate: {
-          if tablesByName[serverRecord.recordType] == nil {
-            $0.setLastKnownServerRecord(serverRecord)
-          } else {
+          if tablesByName.keys.contains(serverRecord.recordType) {
             $0.zoneName = serverRecord.recordID.zoneID.zoneName
             $0.ownerName = serverRecord.recordID.zoneID.ownerName
           }
         }
         .execute(db)
 
-        guard
-          let metadata = try SyncMetadata.find(serverRecord.recordID).fetchOne(db),
-          let table = tablesByName[serverRecord.recordType]
+        // If the table isn't registered yet, store the server record for later replay when
+        // the table becomes known.
+        guard let table = tablesByName[serverRecord.recordType] else {
+          try SyncMetadata
+            .update { $0.setLastKnownServerRecord(serverRecord) }
+            .execute(db)
+          return
+        }
+        
+        guard let metadata = try SyncMetadata
+          .find(serverRecord.recordID)
+          .fetchOne(db)
         else {
           return
         }
