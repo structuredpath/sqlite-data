@@ -1946,15 +1946,16 @@
         serverRecord.userModificationTime = metadata.userModificationTime
 
         func open<T>(_ table: some SynchronizableTable<T>) throws {
-          var columnNames: [String] = T.TableColumns.writableColumns.map(\.name)
+          var columnNamesToUpsert = Set(T.TableColumns.writableColumns.map(\.name))
           if !force,
             let allFields = metadata._lastKnownServerRecordAllFields,
             let row = try T.find(#sql("\(bind: metadata.recordPrimaryKey)")).fetchOne(db)
           {
             serverRecord.update(
               with: allFields,
-              row: T(queryOutput: row),
-              columnNames: &columnNames,
+              clientRow: T(queryOutput: row),
+              clientUserModificationTime: metadata.userModificationTime,
+              columnNamesToUpsert: &columnNamesToUpsert,
               parentForeignKey: foreignKeysByTableName[T.tableName]?.count == 1
                 ? foreignKeysByTableName[T.tableName]?.first
                 : nil
@@ -1963,7 +1964,7 @@
 
           do {
             try $_currentZoneID.withValue(serverRecord.recordID.zoneID) {
-              try #sql(upsert(table, record: serverRecord, columnNames: columnNames)).execute(db)
+              try #sql(upsert(table, record: serverRecord, columnNames: columnNamesToUpsert)).execute(db)
             }
             try UnsyncedRecordID.find(serverRecord.recordID).delete().execute(db)
             try SyncMetadata

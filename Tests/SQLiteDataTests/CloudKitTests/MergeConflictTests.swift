@@ -899,11 +899,53 @@
         // Step 6: Fetch arrives (no-op, conflict already resolved)
         await fetchedRecordZoneChangesCallback.notify()
 
-        await withKnownIssue("Server should win same-field conflict when it has a newer timestamp") {
-          try await userDatabase.read { db in
-            let post = try #require(try Post.find(1).fetchOne(db))
-            #expect(post.title == "Hello from server")
-          }
+        assertQuery(
+          Post.find(1)
+            .join(SyncMetadata.all) { $0.syncMetadataID.eq($1.id) }
+            .select {
+              SyncedRow<Post>.Columns(
+                row: $0,
+                userModificationTime: $1.userModificationTime
+              )
+            },
+          database: userDatabase.database
+        ) {
+          """
+          ┌─────────────────────────────────┐
+          │ SyncedRow(                      │
+          │   row: Post(                    │
+          │     id: 1,                      │
+          │     title: "Hello from server", │
+          │     body: nil,                  │
+          │     isPublished: false          │
+          │   ),                            │
+          │   userModificationTime: 60      │
+          │ )                               │
+          └─────────────────────────────────┘
+          """
+        }
+        assertInlineSnapshot(of: container.privateCloudDatabase, as: .customDump) {
+          """
+          MockCloudDatabase(
+            databaseScope: .private,
+            storage: [
+              [0]: CKRecord(
+                recordID: CKRecord.ID(1:posts/zone/__defaultOwner__),
+                recordType: "posts",
+                parent: nil,
+                share: nil,
+                body🗓️: 0,
+                id: 1,
+                id🗓️: 0,
+                isPublished: 0,
+                isPublished🗓️: 0,
+                title: "Hello from server",
+                title🗓️: 60,
+                🗓️: 60
+              )
+            ]
+          )
+          """
         }
       }
 
@@ -1119,11 +1161,53 @@
         // Step 6: Retry send
         try await syncEngine.processPendingRecordZoneChanges(scope: .private)
 
-        await withKnownIssue("Server should win same-field conflict when it has a newer timestamp") {
-          try await userDatabase.read { db in
-            let post = try #require(try Post.find(1).fetchOne(db))
-            #expect(post.title == "Hello from server")
-          }
+        assertQuery(
+          Post.find(1)
+            .join(SyncMetadata.all) { $0.syncMetadataID.eq($1.id) }
+            .select {
+              SyncedRow<Post>.Columns(
+                row: $0,
+                userModificationTime: $1.userModificationTime
+              )
+            },
+          database: userDatabase.database
+        ) {
+          """
+          ┌─────────────────────────────────┐
+          │ SyncedRow(                      │
+          │   row: Post(                    │
+          │     id: 1,                      │
+          │     title: "Hello from server", │
+          │     body: nil,                  │
+          │     isPublished: false          │
+          │   ),                            │
+          │   userModificationTime: 60      │
+          │ )                               │
+          └─────────────────────────────────┘
+          """
+        }
+        assertInlineSnapshot(of: container.privateCloudDatabase, as: .customDump) {
+          """
+          MockCloudDatabase(
+            databaseScope: .private,
+            storage: [
+              [0]: CKRecord(
+                recordID: CKRecord.ID(1:posts/zone/__defaultOwner__),
+                recordType: "posts",
+                parent: nil,
+                share: nil,
+                body🗓️: 0,
+                id: 1,
+                id🗓️: 0,
+                isPublished: 0,
+                isPublished🗓️: 0,
+                title: "Hello from server",
+                title🗓️: 60,
+                🗓️: 60
+              )
+            ]
+          )
+          """
         }
       }
 
@@ -1416,11 +1500,53 @@
         // Step 5: Send (merged result)
         try await syncEngine.processPendingRecordZoneChanges(scope: .private)
 
-        await withKnownIssue("Server should win same-field conflict when it has a newer timestamp") {
-          try await userDatabase.read { db in
-            let post = try #require(try Post.find(1).fetchOne(db))
-            #expect(post.title == "Hello from server")
-          }
+        assertQuery(
+          Post.find(1)
+            .join(SyncMetadata.all) { $0.syncMetadataID.eq($1.id) }
+            .select {
+              SyncedRow<Post>.Columns(
+                row: $0,
+                userModificationTime: $1.userModificationTime
+              )
+            },
+          database: userDatabase.database
+        ) {
+          """
+          ┌─────────────────────────────────┐
+          │ SyncedRow(                      │
+          │   row: Post(                    │
+          │     id: 1,                      │
+          │     title: "Hello from server", │
+          │     body: nil,                  │
+          │     isPublished: false          │
+          │   ),                            │
+          │   userModificationTime: 60      │
+          │ )                               │
+          └─────────────────────────────────┘
+          """
+        }
+        assertInlineSnapshot(of: container.privateCloudDatabase, as: .customDump) {
+          """
+          MockCloudDatabase(
+            databaseScope: .private,
+            storage: [
+              [0]: CKRecord(
+                recordID: CKRecord.ID(1:posts/zone/__defaultOwner__),
+                recordType: "posts",
+                parent: nil,
+                share: nil,
+                body🗓️: 0,
+                id: 1,
+                id🗓️: 0,
+                isPublished: 0,
+                isPublished🗓️: 0,
+                title: "Hello from server",
+                title🗓️: 60,
+                🗓️: 60
+              )
+            ]
+          )
+          """
         }
       }
 
@@ -1642,11 +1768,54 @@
         // Step 6: Fetch arrives (no-op, conflict already resolved)
         await fetchedRecordZoneChangesCallback.notify()
 
-        await withKnownIssue("Server should win same-field conflict when it has a newer timestamp") {
-          try await userDatabase.read { db in
-            let post = try #require(try Post.find(1).fetchOne(db))
-            #expect(post.body == "Server body")
-          }
+        assertQuery(
+          Post.find(1)
+            .join(SyncMetadata.all) { $0.syncMetadataID.eq($1.id) }
+            .select {
+              SyncedRow<Post>.Columns(
+                row: $0,
+                userModificationTime: $1.userModificationTime
+              )
+            },
+          database: userDatabase.database
+        ) {
+          """
+          ┌────────────────────────────┐
+          │ SyncedRow(                 │
+          │   row: Post(               │
+          │     id: 1,                 │
+          │     title: "Hello",        │
+          │     body: "Server body",   │
+          │     isPublished: false     │
+          │   ),                       │
+          │   userModificationTime: 60 │
+          │ )                          │
+          └────────────────────────────┘
+          """
+        }
+        assertInlineSnapshot(of: container.privateCloudDatabase, as: .customDump) {
+          """
+          MockCloudDatabase(
+            databaseScope: .private,
+            storage: [
+              [0]: CKRecord(
+                recordID: CKRecord.ID(1:posts/zone/__defaultOwner__),
+                recordType: "posts",
+                parent: nil,
+                share: nil,
+                body: "Server body",
+                body🗓️: 60,
+                id: 1,
+                id🗓️: 0,
+                isPublished: 0,
+                isPublished🗓️: 0,
+                title: "Hello",
+                title🗓️: 0,
+                🗓️: 60
+              )
+            ]
+          )
+          """
         }
       }
 
