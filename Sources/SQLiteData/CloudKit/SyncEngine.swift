@@ -1952,7 +1952,39 @@
           return
         }
 
-        serverRecord.userModificationTime = metadata.userModificationTime
+        let ancestorRecord = metadata._lastKnownServerRecordAllFields
+
+        let hasServerChanged: Bool = {
+          guard
+            let ancestorRecord,
+            let ancestorChangeTag = ancestorRecord.recordChangeTag,
+            let serverChangeTag = serverRecord.recordChangeTag
+          else {
+            // Without an ancestor, the server record is upserted as-is. In the unlikely edge
+            // case where a matching client row exists, it gets overwritten.
+            return true
+          }
+          return ancestorChangeTag != serverChangeTag
+        }()
+
+        let hasClientChanged: Bool = {
+          // Without an ancestor, we can't detect client changes (no baseline to compare
+          // against). This effectively falls through to server wins.
+          guard let ancestorRecord else { return false }
+          return metadata.userModificationTime > ancestorRecord.userModificationTime
+        }()
+
+        let hasConflict = hasServerChanged && hasClientChanged
+        print("hasServerChanged", hasServerChanged, "hasClientChanged", hasClientChanged, "hasConflict", hasConflict)
+        
+        if hasConflict {
+          // Sets the record-level userModificationTime to the max of the client and server
+          // modification times, which effectively records the time at which the conflict
+          // resolution has happened. The resolved record is then stored as the new last-known
+          // server record, ensuring that per-field timestamps on the next upload reflect
+          // the resolution time rather than the server's original timestamps.
+          serverRecord.userModificationTime = metadata.userModificationTime
+        }
 
         func open<T>(_ table: some SynchronizableTable<T>) throws {
           var columnNamesToUpsert = Set(T.TableColumns.writableColumns.map(\.name))
