@@ -50,7 +50,6 @@
         }
       let nonEncryptedKeys = Set(allKeys())
         .subtracting(encryptedValues.allKeys())
-        .subtracting(["_recordChangeTag"])
       var baseChildren = [
         ("recordID", recordID as Any),
         ("recordType", recordType as Any),

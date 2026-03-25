@@ -94,11 +94,11 @@
     fileprivate func encodeMockSystemFieldsIfNeeded(with coder: NSKeyedArchiver) {
       guard isTesting else { return }
       coder.encode(
-        self._recordChangeTag,
+        self._recordChangeTag as NSString?,
         forKey: "_recordChangeTag"
       )
       coder.encode(
-        self._modificationDate.map { $0 as NSDate },
+        self._modificationDate as NSDate?,
         forKey: "_modificationDate"
       )
     }
@@ -106,9 +106,9 @@
     fileprivate func decodeMockSystemFieldsIfNeeded(from coder: NSKeyedUnarchiver) {
       guard isTesting else { return }
       self._recordChangeTag = coder.decodeObject(
-        of: NSNumber.self,
+        of: NSString.self,
         forKey: "_recordChangeTag"
-      )?.intValue
+      ) as String?
       self._modificationDate = coder.decodeObject(
         of: NSDate.self,
         forKey: "_modificationDate"
@@ -394,13 +394,6 @@
   }
 
   private struct Unbindable: Error {}
-
-  extension CKRecord {
-    package var _recordChangeTag: Int? {
-      get { self[#function] }
-      set { self[#function] = newValue }
-    }
-  }
 
   extension DataProtocol {
     fileprivate var sha256: Data {
