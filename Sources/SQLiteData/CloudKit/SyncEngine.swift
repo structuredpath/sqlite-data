@@ -1981,6 +1981,10 @@
         let hasConflict = hasServerChanged && hasClientChanged
         print("hasServerChanged", hasServerChanged, "hasClientChanged", hasClientChanged, "hasConflict", hasConflict)
         
+        // Proceed only when the server record has changed (skipping re-delivered records)
+        // or when force-upserting.
+        guard hasServerChanged || force else { return }
+
         if hasConflict {
           // Sets the record-level userModificationTime to the max of the client and server
           // modification times, which effectively records the time at which the conflict
