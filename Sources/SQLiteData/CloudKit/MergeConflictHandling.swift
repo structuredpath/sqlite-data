@@ -36,6 +36,16 @@
     package let server: RowVersion<T>
     package let client: RowVersion<T>
 
+    package init(
+      ancestor: RowVersion<T>,
+      server: RowVersion<T>,
+      client: RowVersion<T>
+    ) {
+      self.ancestor = ancestor
+      self.server = server
+      self.client = client
+    }
+
     /// Resolves a field conflict by key path, delegating to `mergedValue(column:policy:)`.
     package func mergedValue<C: WritableTableColumnExpression>(
       for keyPath: some KeyPath<T.TableColumns, C>,
