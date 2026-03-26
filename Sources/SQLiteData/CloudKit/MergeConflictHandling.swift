@@ -56,6 +56,37 @@
     }
   }
 
+  extension FieldMergePolicy where Value: BinaryInteger {
+    /// Counter merge policy that combines the independent increments and decrements from
+    /// both edited values.
+    public static var counter: Self {
+      Self { ancestor, server, client in
+        ancestor.value
+          + (server.value - ancestor.value)
+          + (client.value - ancestor.value)
+      }
+    }
+  }
+
+  extension FieldMergePolicy where Value: SetAlgebra, Value.Element: Equatable {
+    /// Set merge policy that preserves elements not deleted on either side and adds new elements
+    /// from both sides.
+    public static var set: Self {
+      Self { ancestor, server, client in
+        let notDeleted = ancestor.value
+          .intersection(server.value)
+          .intersection(client.value)
+
+        let addedByServer = server.value.subtracting(ancestor.value)
+        let addedByClient = client.value.subtracting(ancestor.value)
+
+        return notDeleted
+          .union(addedByServer)
+          .union(addedByClient)
+      }
+    }
+  }
+
   public struct FieldVersion<Value> {
     /// The field value.
     package let value: Value
