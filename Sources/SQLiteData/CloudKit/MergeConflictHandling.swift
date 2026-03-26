@@ -4,6 +4,88 @@
   import IssueReporting
   import StructuredQueriesCore
 
+  struct FieldMergePolicy<Value> {
+    let merge: (
+      _ ancestor: FieldVersion<Value>,
+      _ client: FieldVersion<Value>,
+      _ server: FieldVersion<Value>
+    ) -> Value
+  }
+
+  extension FieldMergePolicy {
+    /// Last-edit-wins merge policy that picks the edited value with the newer modification
+    /// timestamp (ties favor the client).
+    static var latest: Self {
+      Self { _, client, server in
+        server.modificationTime > client.modificationTime ? server.value : client.value
+      }
+    }
+  }
+
+  struct FieldVersion<Value> {
+    /// The field value.
+    let value: Value
+    /// The timestamp at which this field was last modified.
+    let modificationTime: Int64
+  }
+
+  /// A three-way merge conflict between an ancestor, client, and server version of a row.
+  @available(iOS 16, macOS 13, tvOS 16, watchOS 9, *)
+  struct MergeConflict<T: PrimaryKeyedTable> where T.TableColumns.PrimaryColumn: WritableTableColumnExpression {
+    let ancestor: RowVersion<T>
+    let client: RowVersion<T>
+    let server: RowVersion<T>
+
+    /// Resolves a field conflict by key path, delegating to `mergedValue(column:policy:)`.
+    func mergedValue<C: WritableTableColumnExpression>(
+      for keyPath: some KeyPath<T.TableColumns, C>,
+      policy: FieldMergePolicy<C.QueryValue.QueryOutput>
+    ) -> C.QueryValue.QueryOutput where C.Root == T {
+      mergedValue(
+        column: T.columns[keyPath: keyPath],
+        policy: policy
+      )
+    }
+    
+    /// Resolves a field conflict by column, applying the given merge policy. Falls through to
+    /// the client or server value when only one side changed.
+    func mergedValue<C: WritableTableColumnExpression>(
+      column: C,
+      policy: FieldMergePolicy<C.QueryValue.QueryOutput>
+    ) -> C.QueryValue.QueryOutput where C.Root == T {
+      let keyPath = column.keyPath
+      let ancestorValue = ancestor.row[keyPath: keyPath]
+      let clientValue = client.row[keyPath: keyPath]
+      let serverValue = server.row[keyPath: keyPath]
+
+      let hasClientChanged = !areEqual(ancestorValue, clientValue, as: C.QueryValue.self)
+      let hasServerChanged = !areEqual(ancestorValue, serverValue, as: C.QueryValue.self)
+
+      switch (hasClientChanged, hasServerChanged) {
+      case (false, false):
+        return ancestorValue
+      case (true, false):
+        return clientValue
+      case (false, true):
+        return serverValue
+      case (true, true):
+        let ancestorField = FieldVersion(
+          value: ancestorValue,
+          modificationTime: ancestor.modificationTime(for: keyPath)
+        )
+        let clientField = FieldVersion(
+          value: clientValue,
+          modificationTime: client.modificationTime(for: keyPath)
+        )
+        let serverField = FieldVersion(
+          value: serverValue,
+          modificationTime: server.modificationTime(for: keyPath)
+        )
+        return policy.merge(ancestorField, clientField, serverField)
+      }
+    }
+  }
+
   /// A snapshot of a table row together with per-field modification timestamps,
   /// used for three-way merge conflict resolution.
   @available(iOS 16, macOS 13, tvOS 16, watchOS 9, *)
