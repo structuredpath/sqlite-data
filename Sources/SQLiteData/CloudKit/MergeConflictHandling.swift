@@ -84,6 +84,27 @@
         return policy.merge(ancestorField, clientField, serverField)
       }
     }
+
+    /// Generates an UPDATE statement that resolves the merge conflict using the `.latest` policy.
+    func makeUpdateQuery() -> QueryFragment {
+      let assignments = T.TableColumns.writableColumns.compactMap { column in
+        func open<Root, Value>(
+          _ column: some WritableTableColumnExpression<Root, Value>
+        ) -> (column: String, value: QueryBinding)? {
+          guard column.name != T.primaryKey.name else { return nil }
+          let column = column as! (any WritableTableColumnExpression<T, Value>)
+          let merged = mergedValue(column: column, policy: .latest)
+          return (column: column.name, value: Value(queryOutput: merged).queryBinding)
+        }
+        return open(column)
+      }
+
+      return """
+        UPDATE \(T.self)
+        SET \(assignments.map { "\(quote: $0.column) = \($0.value)" }.joined(separator: ", "))
+        WHERE (\(T.primaryKey)) = (\(T.PrimaryKey(queryOutput: ancestor.row.primaryKey)))
+        """
+    }
   }
 
   /// A snapshot of a table row together with per-field modification timestamps,

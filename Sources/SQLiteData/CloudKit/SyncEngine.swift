@@ -1998,9 +1998,15 @@
               userModificationTime: metadata.userModificationTime,
               ancestorVersion: ancestorVersion
             )
+            let conflict = MergeConflict(
+              ancestor: ancestorVersion,
+              client: clientVersion,
+              server: serverVersion
+            )
             customDump(ancestorVersion, name: "ancestor")
             customDump(serverVersion, name: "server")
             customDump(clientVersion, name: "client")
+            print(#sql(conflict.makeUpdateQuery()))
 
             serverRecord.update(
               with: ancestorRecord,
