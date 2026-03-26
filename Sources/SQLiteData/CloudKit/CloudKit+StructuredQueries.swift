@@ -299,8 +299,7 @@
       with lastKnownServerRecord: CKRecord,
       clientRow: T,
       clientUserModificationTime: Int64,
-      columnNamesToUpsert: inout Set<String>,
-      parentForeignKey: ForeignKey?
+      columnNamesToUpsert: inout Set<String>
     ) {
       typealias EquatableCKRecordValueProtocol = CKRecordValueProtocol & Equatable
 
@@ -346,9 +345,6 @@
           }
           if didSetLastKnownServerValue {
             columnNamesToUpsert.remove(key)
-            if let parentForeignKey, key == parentForeignKey.from {
-              self.parent = lastKnownServerRecord.parent
-            }
           } else if hasClientValueChanged {
             let lastKnownServerValueModificationTime = lastKnownServerRecord.encryptedValues[at: key]
             let serverValueModificationTime = self.encryptedValues[at: key]

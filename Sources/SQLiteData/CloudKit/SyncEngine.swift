@@ -1994,10 +1994,7 @@
               with: ancestorRecord,
               clientRow: T(queryOutput: row),
               clientUserModificationTime: metadata.userModificationTime,
-              columnNamesToUpsert: &columnNamesToUpsert,
-              parentForeignKey: foreignKeysByTableName[T.tableName]?.count == 1
-                ? foreignKeysByTableName[T.tableName]?.first
-                : nil
+              columnNamesToUpsert: &columnNamesToUpsert
             )
           }
 
