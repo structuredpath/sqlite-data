@@ -1,5 +1,6 @@
 #if canImport(CloudKit)
   import CloudKit
+  import CustomDump
   import IssueReporting
   import StructuredQueriesCore
 
@@ -96,6 +97,41 @@
     /// Returns the modification timestamp for the given column.
     func modificationTime(for column: PartialKeyPath<T>) -> Int64 {
       return modificationTimes[column] ?? -1
+    }
+  }
+
+  @available(iOS 16, macOS 13, tvOS 16, watchOS 9, *)
+  extension RowVersion: CustomDumpReflectable {
+    var customDumpMirror: Mirror {
+      var children: [(label: String?, value: Any)] = []
+      for column in T.TableColumns.writableColumns {
+        func open<Root, Value>(_ column: some WritableTableColumnExpression<Root, Value>) {
+          let keyPath = column.keyPath as! KeyPath<T, Value.QueryOutput>
+          let value = row[keyPath: keyPath]
+          let time = modificationTime(for: keyPath)
+          children.append((column.name, TimestampedValue(value: value, modificationTime: time)))
+        }
+        open(column)
+      }
+      return Mirror(row, children: children, displayStyle: .struct)
+    }
+  }
+
+  private struct TimestampedValue: CustomDumpStringConvertible {
+    let value: Any
+    let modificationTime: Int64
+    var customDumpDescription: String { "\(formatValue(value)) @\(modificationTime)" }
+
+    private func formatValue(_ value: Any) -> String {
+      let mirror = Mirror(reflecting: value)
+      if mirror.displayStyle == .optional {
+        guard let child = mirror.children.first else { return "nil" }
+        return formatValue(child.value)
+      }
+      if value is any StringProtocol {
+        return "\"\(value)\""
+      }
+      return "\(value)"
     }
   }
 
