@@ -1,6 +1,7 @@
 #if canImport(CloudKit)
   import CloudKit
   import ConcurrencyExtras
+  import CustomDump
   import Dependencies
   import OrderedCollections
   import OSLog
@@ -1997,9 +1998,9 @@
               userModificationTime: metadata.userModificationTime,
               ancestorVersion: ancestorVersion
             )
-            print(ancestorVersion)
-            print(serverVersion)
-            print(clientVersion)
+            customDump(ancestorVersion, name: "ancestor")
+            customDump(serverVersion, name: "server")
+            customDump(clientVersion, name: "client")
 
             serverRecord.update(
               with: ancestorRecord,
