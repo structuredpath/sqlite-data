@@ -1962,6 +1962,9 @@
           return ancestorChangeTag != serverChangeTag
         }()
 
+        // Skip re-delivered records unless force-upserting.
+        guard hasServerChanged || force else { return }
+
         let hasClientChanged: Bool = {
           // Without an ancestor, we can't detect client changes (no baseline to compare
           // against). This effectively falls through to server wins.
@@ -1970,57 +1973,60 @@
         }()
 
         let hasConflict = hasServerChanged && hasClientChanged
-        print("hasServerChanged", hasServerChanged, "hasClientChanged", hasClientChanged, "hasConflict", hasConflict)
-        
-        // Proceed only when the server record has changed (skipping re-delivered records)
-        // or when force-upserting.
-        guard hasServerChanged || force else { return }
 
         func open<T>(_ table: some SynchronizableTable<T>) throws {
-          var columnNamesToUpsert = Set(T.TableColumns.writableColumns.map(\.name))
-          
-          if
-            hasConflict && !force,
-            let ancestorRecord,
-            let row = try T.find(#sql("\(bind: metadata.recordPrimaryKey)")).fetchOne(db)
-          {
+          do {
+            if
+              hasConflict && !force,
+              let ancestorRecord,
+              let row = try T.find(#sql("\(bind: metadata.recordPrimaryKey)")).fetchOne(db)
+            {
+              let ancestorVersion = try RowVersion<T>(
+                from: ancestorRecord,
+                db: db
+              )
+              let serverVersion = try RowVersion<T>(
+                from: serverRecord,
+                db: db
+              )
+              let clientVersion = RowVersion<T>(
+                clientRow: T(queryOutput: row),
+                userModificationTime: metadata.userModificationTime,
+                ancestorVersion: ancestorVersion
+              )
+              let conflict = MergeConflict(
+                ancestor: ancestorVersion,
+                client: clientVersion,
+                server: serverVersion
+              )
+              
+              try $_currentZoneID.withValue(serverRecord.recordID.zoneID) {
+                try #sql(conflict.makeUpdateQuery()).execute(db)
+              }
+            } else {
+              try $_currentZoneID.withValue(serverRecord.recordID.zoneID) {
+                try #sql(upsert(
+                  table,
+                  record: serverRecord,
+                  columnNames: Set(T.TableColumns.writableColumns.map(\.name))
+                ))
+                .execute(db)
+              }
+            }
+            
             // Sets the record-level userModificationTime to the max of the client and server
             // modification times, which effectively records the time at which the conflict
             // resolution has happened. The resolved record is then stored as the new last-known
             // server record, ensuring that per-field timestamps on the next upload reflect
             // the resolution time rather than the server's original timestamps.
-            serverRecord.userModificationTime = metadata.userModificationTime
-            
-            let ancestorVersion = try RowVersion<T>(from: ancestorRecord, db: db)
-            let serverVersion = try RowVersion<T>(from: serverRecord, db: db)
-            let clientVersion = RowVersion<T>(
-              clientRow: T(queryOutput: row),
-              userModificationTime: metadata.userModificationTime,
-              ancestorVersion: ancestorVersion
-            )
-            let conflict = MergeConflict(
-              ancestor: ancestorVersion,
-              client: clientVersion,
-              server: serverVersion
-            )
-            customDump(ancestorVersion, name: "ancestor")
-            customDump(serverVersion, name: "server")
-            customDump(clientVersion, name: "client")
-            print(#sql(conflict.makeUpdateQuery()))
-
-            serverRecord.update(
-              with: ancestorRecord,
-              clientRow: T(queryOutput: row),
-              clientUserModificationTime: metadata.userModificationTime,
-              columnNamesToUpsert: &columnNamesToUpsert
-            )
-          }
-
-          do {
-            try $_currentZoneID.withValue(serverRecord.recordID.zoneID) {
-              try #sql(upsert(table, record: serverRecord, columnNames: columnNamesToUpsert)).execute(db)
+            if hasConflict {
+              serverRecord.userModificationTime = metadata.userModificationTime
             }
-            try UnsyncedRecordID.find(serverRecord.recordID).delete().execute(db)
+            
+            try UnsyncedRecordID
+              .find(serverRecord.recordID)
+              .delete()
+              .execute(db)
             try SyncMetadata
               .find(serverRecord.recordID)
               .update { $0.setLastKnownServerRecord(serverRecord) }
