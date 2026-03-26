@@ -1,6 +1,7 @@
 #if canImport(CloudKit)
   public import CloudKit
   package import ConcurrencyExtras
+  import CustomDump
   import Dependencies
   public import GRDB
   public import IssueReporting
@@ -2006,9 +2007,9 @@
               userModificationTime: metadata.userModificationTime,
               ancestorVersion: ancestorVersion
             )
-            print(ancestorVersion)
-            print(serverVersion)
-            print(clientVersion)
+            customDump(ancestorVersion, name: "ancestor")
+            customDump(serverVersion, name: "server")
+            customDump(clientVersion, name: "client")
 
             serverRecord.update(
               with: ancestorRecord,
