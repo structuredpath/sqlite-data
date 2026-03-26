@@ -7,8 +7,8 @@
   struct FieldMergePolicy<Value> {
     let merge: (
       _ ancestor: FieldVersion<Value>,
-      _ client: FieldVersion<Value>,
-      _ server: FieldVersion<Value>
+      _ server: FieldVersion<Value>,
+      _ client: FieldVersion<Value>
     ) -> Value
   }
 
@@ -16,7 +16,7 @@
     /// Last-edit-wins merge policy that picks the edited value with the newer modification
     /// timestamp (ties favor the client).
     static var latest: Self {
-      Self { _, client, server in
+      Self { _, server, client in
         server.modificationTime > client.modificationTime ? server.value : client.value
       }
     }
@@ -29,12 +29,12 @@
     let modificationTime: Int64
   }
 
-  /// A three-way merge conflict between an ancestor, client, and server version of a row.
+  /// A three-way merge conflict between an ancestor, server, and client version of a row.
   @available(iOS 16, macOS 13, tvOS 16, watchOS 9, *)
   struct MergeConflict<T: PrimaryKeyedTable> where T.TableColumns.PrimaryColumn: WritableTableColumnExpression {
     let ancestor: RowVersion<T>
-    let client: RowVersion<T>
     let server: RowVersion<T>
+    let client: RowVersion<T>
 
     /// Resolves a field conflict by key path, delegating to `mergedValue(column:policy:)`.
     func mergedValue<C: WritableTableColumnExpression>(
@@ -81,7 +81,7 @@
           value: serverValue,
           modificationTime: server.modificationTime(for: keyPath)
         )
-        return policy.merge(ancestorField, clientField, serverField)
+        return policy.merge(ancestorField, serverField, clientField)
       }
     }
 

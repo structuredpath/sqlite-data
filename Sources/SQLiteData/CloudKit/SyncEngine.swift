@@ -2006,8 +2006,8 @@
               )
               let conflict = MergeConflict(
                 ancestor: ancestorVersion,
-                client: clientVersion,
-                server: serverVersion
+                server: serverVersion,
+                client: clientVersion
               )
 
               try $_currentZoneID.withValue(serverRecord.recordID.zoneID) {
