@@ -92,7 +92,7 @@
         #expect(conflict.mergedValue(for: \.field7, policy: .latest) == "bar")
       }
         
-      @Test func mergeConflict_resolutionRoundtrip() throws {
+      @Test func mergeConflict_resolutionRoundtrip_canonicalConflict() throws {
         try userDatabase.write { db in
           try #sql(
             """
@@ -113,6 +113,7 @@
           try MergeModel.insert { conflict.client.row }.execute(db)
           
           let query = #sql(conflict.makeUpdateQuery(), as: Void.self)
+          
           assertInlineSnapshot(of: query, as: .sql) {
             """
             UPDATE "mergeModels"
@@ -135,6 +136,68 @@
             field7: "bar"
           ))
         }
+      }
+      
+      @Test func mergeConflict_resolutionRoundtrip_customMergePolicies() throws {
+        typealias Post = Post_CustomMergeConflictResolvable
+        
+        try userDatabase.write { db in
+          try #sql(
+            """
+            CREATE TABLE "customPosts" (
+              "id" INTEGER PRIMARY KEY NOT NULL,
+              "title" TEXT NOT NULL DEFAULT '',
+              "likes" INTEGER NOT NULL DEFAULT 0,
+              "tags" TEXT NOT NULL DEFAULT '[]'
+            ) STRICT
+            """
+          ).execute(db)
+          
+          let conflict = MergeConflict(
+            ancestor: RowVersion(
+              row: Post(id: 0, title: "Hello", likes: 10, tags: ["bar", "foo"]),
+              modificationTimes: [\.title: 0, \.likes: 0, \.tags: 0]
+            ),
+            server: RowVersion(
+              row: Post(id: 0, title: "Hello from server", likes: 13, tags: ["foo"]),
+              modificationTimes: [\.title: 60, \.likes: 60, \.tags: 60]
+            ),
+            client: RowVersion(
+              row: Post(id: 0, title: "Hello from client", likes: 12, tags: ["foo", "baz"]),
+              modificationTimes: [\.title: 30, \.likes: 30, \.tags: 30]
+            )
+          )
+          
+          try Post.insert { conflict.client.row }.execute(db)
+          
+          try #sql(conflict.makeUpdateQuery()).execute(db)
+          let merged = try Post.fetchOne(db)!
+          
+          // `FieldMergePolicy.latest` (default): "Hello from server" (server newer)
+          #expect(merged.title == "Hello from server")
+          // `FieldMergePolicy.counter`: 10 + (13 - 10) + (12 - 10) = 15
+          #expect(merged.likes == 15)
+          // `FieldMergePolicy.set`: kept "foo", server removed "bar", client added "baz"
+          #expect(merged.tags == ["foo", "baz"])
+        }
+      }
+    }
+  }
+
+  @Table("customPosts")
+  private struct Post_CustomMergeConflictResolvable: Equatable {
+    let id: Int
+    var title: String
+    var likes: Int
+    @Column(as: Set<String>.JSONRepresentation.self)
+    var tags: Set<String>
+  }
+
+  extension Post_CustomMergeConflictResolvable: CustomMergeConflictResolvable {
+    static var mergePolicies: MergePolicyRegistry<Self> {
+      MergePolicyRegistry<Self> {
+        $0[\.likes] = .counter
+        $0[\.tags] = .set
       }
     }
   }
