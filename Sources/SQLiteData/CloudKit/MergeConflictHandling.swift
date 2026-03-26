@@ -107,6 +107,21 @@
     }
   }
 
+  @available(iOS 16, macOS 13, tvOS 16, watchOS 9, *)
+  extension MergeConflict: CustomDumpReflectable {
+    var customDumpMirror: Mirror {
+      Mirror(
+        self,
+        children: [
+          ("ancestor", ancestor),
+          ("server", server),
+          ("client", client),
+        ],
+        displayStyle: .struct
+      )
+    }
+  }
+
   /// A snapshot of a table row together with per-field modification timestamps,
   /// used for three-way merge conflict resolution.
   @available(iOS 16, macOS 13, tvOS 16, watchOS 9, *)
