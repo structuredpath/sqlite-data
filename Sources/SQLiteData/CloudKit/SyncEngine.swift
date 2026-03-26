@@ -2001,7 +2001,14 @@
             
             let ancestorVersion = try RowVersion<T>(from: ancestorRecord, db: db)
             let serverVersion = try RowVersion<T>(from: serverRecord, db: db)
-            print("ancestor:", ancestorVersion.row, "server:", serverVersion.row)
+            let clientVersion = RowVersion<T>(
+              clientRow: T(queryOutput: row),
+              userModificationTime: metadata.userModificationTime,
+              ancestorVersion: ancestorVersion
+            )
+            print(ancestorVersion)
+            print(serverVersion)
+            print(clientVersion)
 
             serverRecord.update(
               with: ancestorRecord,
