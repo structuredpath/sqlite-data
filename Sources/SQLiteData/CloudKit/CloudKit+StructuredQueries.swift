@@ -394,7 +394,7 @@
   private struct Unbindable: Error {}
 
   extension DataProtocol {
-    fileprivate var sha256: Data {
+    var sha256: Data {
       Data(SHA256.hash(data: self))
     }
   }

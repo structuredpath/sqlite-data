@@ -1998,6 +1998,10 @@
             // server record, ensuring that per-field timestamps on the next upload reflect
             // the resolution time rather than the server's original timestamps.
             serverRecord.userModificationTime = metadata.userModificationTime
+            
+            let ancestorVersion = try RowVersion<T>(from: ancestorRecord, db: db)
+            let serverVersion = try RowVersion<T>(from: serverRecord, db: db)
+            print("ancestor:", ancestorVersion.row, "server:", serverVersion.row)
 
             serverRecord.update(
               with: ancestorRecord,
