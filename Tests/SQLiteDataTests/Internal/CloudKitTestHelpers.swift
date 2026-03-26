@@ -93,16 +93,19 @@ extension SyncEngine {
     return ModifyRecordsCallback {
       await syncEngine.parentSyncEngine.handleEvent(
         .fetchedRecordZoneChanges(
-          modifications: saveResults.values.compactMap {
-            guard let record = try? $0.get() else { return nil }
-            return record.copy() as? CKRecord
+          modifications: saveResults.compactMap { recordID, result in
+            guard case .success = result else { return nil }
+            // NB: Read the latest version from the database in case the record has been
+            //     modified between the original save and when this callback is invoked.
+            return try? syncEngine.database.record(for: recordID)
           },
           deletions: deleteResults.compactMap { recordID, result in
-            (recordsToDeleteByID[recordID]?.recordType).flatMap { recordType in
-              (try? result.get()) != nil
-                ? (recordID, recordType)
-                : nil
-            }
+            guard case .success = result else { return nil }
+            // NB: Skip if the record has been re-saved between the original delete and
+            //     when this callback is invoked.
+            guard (try? syncEngine.database.record(for: recordID)) == nil else { return nil }
+            guard let record = recordsToDeleteByID[recordID] else { return nil }
+            return (recordID, record.recordType)
           }
         ),
         syncEngine: syncEngine
