@@ -39,6 +39,16 @@
   }
 
   public struct FieldMergePolicy<Value> {
+    public init(
+      _ merge: @escaping (
+        _ ancestor: FieldVersion<Value>,
+        _ server: FieldVersion<Value>,
+        _ client: FieldVersion<Value>
+      ) -> Value
+    ) {
+      self.merge = merge
+    }
+      
     public let merge: (
       _ ancestor: FieldVersion<Value>,
       _ server: FieldVersion<Value>,
@@ -89,9 +99,9 @@
 
   public struct FieldVersion<Value> {
     /// The field value.
-    package let value: Value
+    public let value: Value
     /// The timestamp at which this field was last modified.
-    package let modificationTime: Int64
+    public let modificationTime: Int64
   }
 
   /// A three-way merge conflict between an ancestor, server, and client version of a row.
