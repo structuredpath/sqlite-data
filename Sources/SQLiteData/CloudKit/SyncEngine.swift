@@ -1985,23 +1985,22 @@
         // or when force-upserting.
         guard hasServerChanged || force else { return }
 
-        if hasConflict {
-          // Sets the record-level userModificationTime to the max of the client and server
-          // modification times, which effectively records the time at which the conflict
-          // resolution has happened. The resolved record is then stored as the new last-known
-          // server record, ensuring that per-field timestamps on the next upload reflect
-          // the resolution time rather than the server's original timestamps.
-          serverRecord.userModificationTime = metadata.userModificationTime
-        }
-
         func open<T>(_ table: some SynchronizableTable<T>) throws {
           var columnNamesToUpsert = Set(T.TableColumns.writableColumns.map(\.name))
-          if !force,
-            let allFields = metadata._lastKnownServerRecordAllFields,
+          if
+            hasConflict && !force,
+            let ancestorRecord,
             let row = try T.unscoped.find(#sql("\(bind: metadata.recordPrimaryKey)")).fetchOne(db)
           {
+            // Sets the record-level userModificationTime to the max of the client and server
+            // modification times, which effectively records the time at which the conflict
+            // resolution has happened. The resolved record is then stored as the new last-known
+            // server record, ensuring that per-field timestamps on the next upload reflect
+            // the resolution time rather than the server's original timestamps.
+            serverRecord.userModificationTime = metadata.userModificationTime
+
             serverRecord.update(
-              with: allFields,
+              with: ancestorRecord,
               clientRow: T(queryOutput: row),
               clientUserModificationTime: metadata.userModificationTime,
               columnNamesToUpsert: &columnNamesToUpsert,
