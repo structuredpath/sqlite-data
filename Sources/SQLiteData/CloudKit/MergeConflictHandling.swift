@@ -4,8 +4,42 @@
   import IssueReporting
   import StructuredQueriesCore
 
-  package struct FieldMergePolicy<Value> {
-    package let merge: (
+  public protocol CustomMergeConflictResolvable: PrimaryKeyedTable
+    where TableColumns.PrimaryColumn: WritableTableColumnExpression
+  {
+    static var mergePolicies: MergePolicyRegistry<Self> { get }
+  }
+
+  public struct MergePolicyRegistry<T> {
+    private var storage: [PartialKeyPath<T>: (Any, Any, Any) -> Any] = [:]
+
+    public init(_ build: (inout Self) -> Void) {
+      build(&self)
+    }
+
+    public subscript<Value>(
+      keyPath: KeyPath<T, Value>
+    ) -> FieldMergePolicy<Value>? {
+      get {
+        guard let merge = storage[keyPath] else { return nil }
+        return FieldMergePolicy { merge($0, $1, $2) as! Value }
+      }
+      set {
+        storage[keyPath] = newValue.map { policy in
+          {
+            policy.merge(
+              $0 as! FieldVersion<Value>,
+              $1 as! FieldVersion<Value>,
+              $2 as! FieldVersion<Value>
+            )
+          }
+        }
+      }
+    }
+  }
+
+  public struct FieldMergePolicy<Value> {
+    public let merge: (
       _ ancestor: FieldVersion<Value>,
       _ server: FieldVersion<Value>,
       _ client: FieldVersion<Value>
@@ -15,14 +49,14 @@
   extension FieldMergePolicy {
     /// Last-edit-wins merge policy that picks the edited value with the newer modification
     /// timestamp (ties favor the client).
-    package static var latest: Self {
+    public static var latest: Self {
       Self { _, server, client in
         server.modificationTime > client.modificationTime ? server.value : client.value
       }
     }
   }
 
-  package struct FieldVersion<Value> {
+  public struct FieldVersion<Value> {
     /// The field value.
     package let value: Value
     /// The timestamp at which this field was last modified.
@@ -95,7 +129,8 @@
       }
     }
 
-    /// Generates an UPDATE statement that resolves the merge conflict using the `.latest` policy.
+    /// Generates an UPDATE statement that resolves the merge conflict, using per-field policies
+    /// from `CustomMergeConflictResolvable` when available, falling back to `.latest`.
     package func makeUpdateQuery() -> QueryFragment {
       let assignments = T.TableColumns.writableColumns.compactMap { column in
         func open<Root, Value>(
@@ -103,7 +138,8 @@
         ) -> (column: String, value: QueryBinding)? {
           guard column.name != T.primaryKey.name else { return nil }
           let column = column as! (any WritableTableColumnExpression<T, Value>)
-          let merged = mergedValue(column: column, policy: .latest)
+          let policy = policy(for: column.keyPath)
+          let merged = mergedValue(column: column, policy: policy)
           return (column: column.name, value: Value(queryOutput: merged).queryBinding)
         }
         return open(column)
@@ -114,6 +150,18 @@
         SET \(assignments.map { "\(quote: $0.column) = \($0.value)" }.joined(separator: ", "))
         WHERE (\(T.primaryKey)) = (\(T.PrimaryKey(queryOutput: ancestor.row.primaryKey)))
         """
+    }
+    
+    private func policy<Value>(
+      for keyPath: KeyPath<T, Value>
+    ) -> FieldMergePolicy<Value> {
+      func open<U: CustomMergeConflictResolvable>(_ table: U.Type) -> FieldMergePolicy<Value>? {
+        table.mergePolicies[keyPath as! KeyPath<U, Value>]
+      }
+      if let table = T.self as? any CustomMergeConflictResolvable.Type, let policy = open(table) {
+        return policy
+      }
+      return .latest
     }
   }
 
