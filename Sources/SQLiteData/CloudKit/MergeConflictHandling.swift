@@ -20,6 +20,36 @@
       self.modificationTimes = modificationTimes
     }
     
+    /// Creates a client row version by deriving per-field modification timestamps from the
+    /// ancestor: changed fields get the client's modification time, unchanged fields inherit
+    /// the ancestor's timestamp.
+    init(
+      clientRow row: T,
+      userModificationTime: Int64,
+      ancestorVersion: RowVersion<T>
+    ) {
+      var modificationTimes: [PartialKeyPath<T>: Int64] = [:]
+      for column in T.TableColumns.writableColumns {
+        func open<Root, Value>(_ column: some WritableTableColumnExpression<Root, Value>) {
+          let keyPath = column.keyPath as! KeyPath<T, Value.QueryOutput>
+          let clientValue = row[keyPath: keyPath]
+          let ancestorValue = ancestorVersion.row[keyPath: keyPath]
+          
+          if areEqual(clientValue, ancestorValue, as: Value.self) {
+            modificationTimes[keyPath] = ancestorVersion.modificationTime(for: keyPath)
+          } else {
+            modificationTimes[keyPath] = userModificationTime
+          }
+        }
+        open(column)
+      }
+      
+      self.init(
+        row: row,
+        modificationTimes: modificationTimes
+      )
+    }
+
     /// Creates a row version from a `CKRecord` by decoding its encrypted values into a row
     /// and reading per-field modification timestamps. Requires a database connection to execute
     /// a synthetic SQL SELECT for type-safe decoding.
