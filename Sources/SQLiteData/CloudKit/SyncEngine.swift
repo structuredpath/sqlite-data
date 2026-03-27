@@ -1227,7 +1227,6 @@
             with: T(queryOutput: row),
             userModificationTime: metadata.userModificationTime
           )
-          await refreshLastKnownServerRecord(record)
           sentRecord = recordID
           return record
         }
