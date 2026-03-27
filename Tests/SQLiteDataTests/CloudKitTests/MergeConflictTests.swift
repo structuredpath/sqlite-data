@@ -1799,6 +1799,202 @@
           """
         }
       }
+
+      // MARK: - Reconciliation (No Last-Known Server Record)
+
+      @Test func reconciliation_fetchBeforeSend_clientNewer() async throws {
+        // Step 1: Client creates Post @ t=60 (no prior sync)
+        try await withDependencies {
+          $0.currentTime.now = 60
+        } operation: {
+          try await userDatabase.userWrite { db in
+            try db.seed { Post(id: 1, title: "Hello from client") }
+          }
+        }
+
+        // Step 2: Server has Post @ t=30 (simulating another device)
+        let serverRecord = CKRecord(
+          recordType: Post.tableName,
+          recordID: Post.recordID(for: 1)
+        )
+        serverRecord.setValue(Int64(1), forKey: "id", at: 30)
+        serverRecord.setValue("Hello from server", forKey: "title", at: 30)
+        serverRecord.removeValue(forKey: "body", at: 30)
+        serverRecord.setValue(Int64(0), forKey: "isPublished", at: 30)
+        serverRecord.userModificationTime = 30
+        let fetchedRecordZoneChangesCallback = try syncEngine.modifyRecords(
+          scope: .private,
+          saving: [serverRecord]
+        )
+
+        // Step 3: Fetch arrives (conflict, no ancestor for merge)
+        await fetchedRecordZoneChangesCallback.notify()
+
+        // Step 4: Send (merged result)
+        try await syncEngine.processPendingRecordZoneChanges(scope: .private)
+
+        await withKnownIssue("Client's newer value should win with no last-known server record") {
+          try await userDatabase.read { db in
+            let post = try #require(try Post.find(1).fetchOne(db))
+            #expect(post.title == "Hello from client")
+          }
+        }
+      }
+
+      @Test func reconciliation_fetchBeforeSend_serverNewer() async throws {
+        // Step 1: Client creates Post @ t=30 (no prior sync)
+        try await withDependencies {
+          $0.currentTime.now = 30
+        } operation: {
+          try await userDatabase.userWrite { db in
+            try db.seed { Post(id: 1, title: "Hello from client") }
+          }
+        }
+
+        // Step 2: Server has Post @ t=60 (simulating another device)
+        let serverRecord = CKRecord(
+          recordType: Post.tableName,
+          recordID: Post.recordID(for: 1)
+        )
+        serverRecord.setValue(Int64(1), forKey: "id", at: 60)
+        serverRecord.setValue("Hello from server", forKey: "title", at: 60)
+        serverRecord.removeValue(forKey: "body", at: 60)
+        serverRecord.setValue(Int64(0), forKey: "isPublished", at: 60)
+        serverRecord.userModificationTime = 60
+        let fetchedRecordZoneChangesCallback = try syncEngine.modifyRecords(
+          scope: .private,
+          saving: [serverRecord]
+        )
+
+        // Step 3: Fetch arrives (conflict, no ancestor for merge)
+        await fetchedRecordZoneChangesCallback.notify()
+
+        // Step 4: Send (merged result)
+        try await syncEngine.processPendingRecordZoneChanges(scope: .private)
+
+        assertQuery(
+          Post.find(1)
+            .join(SyncMetadata.all) { $0.syncMetadataID.eq($1.id) }
+            .select {
+              SyncedRow<Post>.Columns(
+                row: $0,
+                userModificationTime: $1.userModificationTime
+              )
+            },
+          database: userDatabase.database
+        ) {
+          """
+          ┌─────────────────────────────────┐
+          │ SyncedRow(                      │
+          │   row: Post(                    │
+          │     id: 1,                      │
+          │     title: "Hello from server", │
+          │     body: nil,                  │
+          │     isPublished: false          │
+          │   ),                            │
+          │   userModificationTime: 60      │
+          │ )                               │
+          └─────────────────────────────────┘
+          """
+        }
+      }
+
+      @Test func reconciliation_sendBeforeFetch_clientNewer() async throws {
+        // Step 1: Server has Post @ t=30 (simulating another device)
+        let serverRecord = CKRecord(
+          recordType: Post.tableName,
+          recordID: Post.recordID(for: 1)
+        )
+        serverRecord.setValue(Int64(1), forKey: "id", at: 30)
+        serverRecord.setValue("Hello from server", forKey: "title", at: 30)
+        serverRecord.removeValue(forKey: "body", at: 30)
+        serverRecord.setValue(Int64(0), forKey: "isPublished", at: 30)
+        serverRecord.userModificationTime = 30
+        let fetchedRecordZoneChangesCallback = try syncEngine.modifyRecords(
+          scope: .private,
+          saving: [serverRecord]
+        )
+
+        // Step 2: Client creates Post @ t=60 (no prior sync)
+        try await withDependencies {
+          $0.currentTime.now = 60
+        } operation: {
+          try await userDatabase.userWrite { db in
+            try db.seed { Post(id: 1, title: "Hello from client") }
+          }
+        }
+
+        // Step 3: Send (rejected, server already has the record)
+        try await syncEngine.processPendingRecordZoneChanges(scope: .private)
+
+        // Step 4: Fetch arrives (conflict, no ancestor for merge)
+        await fetchedRecordZoneChangesCallback.notify()
+
+        await withKnownIssue("Client's newer value should win with no last-known server record") {
+          try await userDatabase.read { db in
+            let post = try #require(try Post.find(1).fetchOne(db))
+            #expect(post.title == "Hello from client")
+          }
+        }
+      }
+
+      @Test func reconciliation_sendBeforeFetch_serverNewer() async throws {
+        // Step 1: Server has Post @ t=60 (simulating another device)
+        let serverRecord = CKRecord(
+          recordType: Post.tableName,
+          recordID: Post.recordID(for: 1)
+        )
+        serverRecord.setValue(Int64(1), forKey: "id", at: 60)
+        serverRecord.setValue("Hello from server", forKey: "title", at: 60)
+        serverRecord.removeValue(forKey: "body", at: 60)
+        serverRecord.setValue(Int64(0), forKey: "isPublished", at: 60)
+        serverRecord.userModificationTime = 60
+        let fetchedRecordZoneChangesCallback = try syncEngine.modifyRecords(
+          scope: .private,
+          saving: [serverRecord]
+        )
+
+        // Step 2: Client creates Post @ t=30 (no prior sync)
+        try await withDependencies {
+          $0.currentTime.now = 30
+        } operation: {
+          try await userDatabase.userWrite { db in
+            try db.seed { Post(id: 1, title: "Hello from client") }
+          }
+        }
+
+        // Step 3: Send (rejected, server already has the record)
+        try await syncEngine.processPendingRecordZoneChanges(scope: .private)
+
+        // Step 4: Fetch arrives (conflict, no ancestor for merge)
+        await fetchedRecordZoneChangesCallback.notify()
+
+        assertQuery(
+          Post.find(1)
+            .join(SyncMetadata.all) { $0.syncMetadataID.eq($1.id) }
+            .select {
+              SyncedRow<Post>.Columns(
+                row: $0,
+                userModificationTime: $1.userModificationTime
+              )
+            },
+          database: userDatabase.database
+        ) {
+          """
+          ┌─────────────────────────────────┐
+          │ SyncedRow(                      │
+          │   row: Post(                    │
+          │     id: 1,                      │
+          │     title: "Hello from server", │
+          │     body: nil,                  │
+          │     isPublished: false          │
+          │   ),                            │
+          │   userModificationTime: 60      │
+          │ )                               │
+          └─────────────────────────────────┘
+          """
+        }
+      }
     }
   }
 
