@@ -40,60 +40,115 @@
 
   public struct FieldMergePolicy<Value> {
     public init(
+      merge: @escaping (
+        _ ancestor: FieldVersion<Value>,
+        _ server: FieldVersion<Value>,
+        _ client: FieldVersion<Value>
+      ) -> Value,
+      reconcile: @escaping (
+        _ server: FieldVersion<Value>,
+        _ client: FieldVersion<Value>
+      ) -> Value
+    ) {
+      self.merge = merge
+      self.reconcile = reconcile
+    }
+
+    /// Convenience initializer that derives a default reconciliation by picking the value
+    /// with the newer modification timestamp (server wins ties). If your merge logic has
+    /// semantics that don't reduce to last-write-wins (e.g. a counter combiner or a set
+    /// union), supply an explicit `reconcile` closure via the designated init — the
+    /// derived default may not match your intent in the no-ancestor case.
+    public init(
       _ merge: @escaping (
         _ ancestor: FieldVersion<Value>,
         _ server: FieldVersion<Value>,
         _ client: FieldVersion<Value>
       ) -> Value
     ) {
-      self.merge = merge
+      self.init(
+        merge: merge,
+        reconcile: { server, client in
+          client.modificationTime > server.modificationTime ? client.value : server.value
+        }
+      )
     }
-      
+
+    /// Resolves a field conflict given an ancestor, server, and client version.
     public let merge: (
       _ ancestor: FieldVersion<Value>,
+      _ server: FieldVersion<Value>,
+      _ client: FieldVersion<Value>
+    ) -> Value
+
+    /// Resolves a field conflict when no shared ancestor is available — invoked when
+    /// client and server diverge without a baseline, e.g. when both sides independently
+    /// created a row with the same primary key before any sync occurred. (Analogous to
+    /// "salvaging" in the Forked library.)
+    public let reconcile: (
       _ server: FieldVersion<Value>,
       _ client: FieldVersion<Value>
     ) -> Value
   }
 
   extension FieldMergePolicy {
-    /// Last-edit-wins merge policy that picks the edited value with the newer modification
-    /// timestamp (ties favor the client).
+    /// Last-edit-wins policy that picks the value with the newer modification timestamp.
+    /// Ties favor the server in both three-way merges and two-way reconciliation, since
+    /// the server is the shared source of truth across devices.
     public static var latest: Self {
-      Self { _, server, client in
-        server.modificationTime > client.modificationTime ? server.value : client.value
-      }
+      Self(
+        merge: { _, server, client in
+          client.modificationTime > server.modificationTime ? client.value : server.value
+        },
+        reconcile: { server, client in
+          client.modificationTime > server.modificationTime ? client.value : server.value
+        }
+      )
     }
   }
 
   extension FieldMergePolicy where Value: BinaryInteger {
-    /// Counter merge policy that combines the independent increments and decrements from
-    /// both edited values.
+    /// Counter policy that combines independent increments and decrements from both edited
+    /// values. Without an ancestor, deltas can't be reconstructed (both values are absolute
+    /// counts, not deltas from a known baseline) so reconciliation falls back to last-edit
+    /// wins. If your app actually wants "treat both as deltas from zero and sum" semantics,
+    /// supply a custom policy.
     public static var counter: Self {
-      Self { ancestor, server, client in
-        ancestor.value
-          + (server.value - ancestor.value)
-          + (client.value - ancestor.value)
-      }
+      Self(
+        merge: { ancestor, server, client in
+          ancestor.value
+            + (server.value - ancestor.value)
+            + (client.value - ancestor.value)
+        },
+        reconcile: { server, client in
+          client.modificationTime > server.modificationTime ? client.value : server.value
+        }
+      )
     }
   }
 
   extension FieldMergePolicy where Value: SetAlgebra, Value.Element: Equatable {
-    /// Set merge policy that preserves elements not deleted on either side and adds new elements
-    /// from both sides.
+    /// Set policy that preserves elements not deleted on either side and adds new elements
+    /// from both sides. Without an ancestor, no element is known to have been deleted, so
+    /// reconciliation is a plain union.
     public static var set: Self {
-      Self { ancestor, server, client in
-        let notDeleted = ancestor.value
-          .intersection(server.value)
-          .intersection(client.value)
+      Self(
+        merge: { ancestor, server, client in
+          let notDeleted = ancestor.value
+            .intersection(server.value)
+            .intersection(client.value)
 
-        let addedByServer = server.value.subtracting(ancestor.value)
-        let addedByClient = client.value.subtracting(ancestor.value)
+          let addedByServer = server.value.subtracting(ancestor.value)
+          let addedByClient = client.value.subtracting(ancestor.value)
 
-        return notDeleted
-          .union(addedByServer)
-          .union(addedByClient)
-      }
+          return notDeleted
+            .union(addedByServer)
+            .union(addedByClient)
+        },
+        reconcile: { server, client in
+          server.value.union(client.value)
+        }
+      )
     }
   }
 
@@ -196,13 +251,102 @@
     private func policy<Value>(
       for keyPath: KeyPath<T, Value>
     ) -> FieldMergePolicy<Value> {
-      func open<U: CustomMergeConflictResolvable>(_ table: U.Type) -> FieldMergePolicy<Value>? {
-        table.mergePolicies[keyPath as! KeyPath<U, Value>]
+      mergePolicy(for: keyPath, table: T.self)
+    }
+  }
+
+  /// Resolves the merge policy for a given column on a table, falling back to `.latest`
+  /// when the table does not opt into `CustomMergeConflictResolvable` or does not
+  /// register a policy for the column.
+  @available(iOS 16, macOS 13, tvOS 16, watchOS 9, *)
+  private func mergePolicy<T: PrimaryKeyedTable, Value>(
+    for keyPath: KeyPath<T, Value>,
+    table: T.Type
+  ) -> FieldMergePolicy<Value> {
+    func open<U: CustomMergeConflictResolvable>(_ table: U.Type) -> FieldMergePolicy<Value>? {
+      table.mergePolicies[keyPath as! KeyPath<U, Value>]
+    }
+    if let table = T.self as? any CustomMergeConflictResolvable.Type, let policy = open(table) {
+      return policy
+    }
+    return .latest
+  }
+
+  /// A two-way reconciliation conflict between a server and client version of a row when
+  /// no shared ancestor exists — for example, when both sides independently created a row
+  /// with the same primary key before any sync occurred. Field values are resolved by
+  /// invoking `FieldMergePolicy.reconcile` rather than `FieldMergePolicy.merge`.
+  @available(iOS 16, macOS 13, tvOS 16, watchOS 9, *)
+  package struct ReconciliationConflict<T: PrimaryKeyedTable>
+  where T.TableColumns.PrimaryColumn: WritableTableColumnExpression {
+    package let server: RowVersion<T>
+    package let client: RowVersion<T>
+
+    package init(server: RowVersion<T>, client: RowVersion<T>) {
+      self.server = server
+      self.client = client
+    }
+
+    /// Resolves a field by key path, delegating to `reconciledValue(column:policy:)`.
+    package func reconciledValue<C: WritableTableColumnExpression>(
+      for keyPath: some KeyPath<T.TableColumns, C>,
+      policy: FieldMergePolicy<C.QueryValue.QueryOutput>
+    ) -> C.QueryValue.QueryOutput where C.Root == T {
+      reconciledValue(
+        column: T.columns[keyPath: keyPath],
+        policy: policy
+      )
+    }
+
+    /// Resolves a field by column, applying the policy's `reconcile` closure. When the
+    /// two sides hold the same value, that value is returned directly.
+    package func reconciledValue<C: WritableTableColumnExpression>(
+      column: C,
+      policy: FieldMergePolicy<C.QueryValue.QueryOutput>
+    ) -> C.QueryValue.QueryOutput where C.Root == T {
+      let keyPath = column.keyPath
+      let clientValue = client.row[keyPath: keyPath]
+      let serverValue = server.row[keyPath: keyPath]
+
+      if areEqual(clientValue, serverValue, as: C.QueryValue.self) {
+        return clientValue
       }
-      if let table = T.self as? any CustomMergeConflictResolvable.Type, let policy = open(table) {
-        return policy
+
+      let clientField = FieldVersion(
+        value: clientValue,
+        modificationTime: client.modificationTime(for: keyPath)
+      )
+      let serverField = FieldVersion(
+        value: serverValue,
+        modificationTime: server.modificationTime(for: keyPath)
+      )
+      return policy.reconcile(serverField, clientField)
+    }
+
+    /// Generates an UPDATE statement that resolves the two-way conflict, using per-field
+    /// policies from `CustomMergeConflictResolvable` when available, falling back to `.latest`.
+    /// Returns `nil` when the table has no writable columns besides the primary key, in which
+    /// case there is nothing meaningful to merge.
+    package func makeUpdateQuery() -> QueryFragment? {
+      let assignments = T.TableColumns.writableColumns.compactMap { column in
+        func open<Root, Value>(
+          _ column: some WritableTableColumnExpression<Root, Value>
+        ) -> (column: String, value: QueryBinding)? {
+          guard column.name != T.primaryKey.name else { return nil }
+          let column = column as! (any WritableTableColumnExpression<T, Value>)
+          let policy = mergePolicy(for: column.keyPath, table: T.self)
+          let reconciled = reconciledValue(column: column, policy: policy)
+          return (column: column.name, value: Value(queryOutput: reconciled).queryBinding)
+        }
+        return open(column)
       }
-      return .latest
+      guard !assignments.isEmpty else { return nil }
+
+      return """
+        UPDATE \(T.self)
+        SET \(assignments.map { "\(quote: $0.column) = \($0.value)" }.joined(separator: ", "))
+        WHERE (\(T.primaryKey)) = (\(T.PrimaryKey(queryOutput: client.row.primaryKey)))
+        """
     }
   }
 
@@ -238,6 +382,23 @@
       self.modificationTimes = modificationTimes
     }
     
+    /// Creates a client row version without an ancestor by assigning the given row-level
+    /// modification time to every writable column. Used for two-way reconciliation when no
+    /// shared baseline exists.
+    package init(
+      clientRow row: T,
+      userModificationTime: Int64
+    ) {
+      var modificationTimes: [PartialKeyPath<T>: Int64] = [:]
+      for column in T.TableColumns.writableColumns {
+        func open<Root, Value>(_ column: some WritableTableColumnExpression<Root, Value>) {
+          modificationTimes[column.keyPath as! PartialKeyPath<T>] = userModificationTime
+        }
+        open(column)
+      }
+      self.init(row: row, modificationTimes: modificationTimes)
+    }
+
     /// Creates a client row version by deriving per-field modification timestamps from the
     /// ancestor: changed fields get the client's modification time, unchanged fields inherit
     /// the ancestor's timestamp.

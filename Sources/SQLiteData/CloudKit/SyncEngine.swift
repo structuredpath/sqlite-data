@@ -1955,8 +1955,9 @@
             let ancestorChangeTag = ancestorRecord.recordChangeTag,
             let serverChangeTag = serverRecord.recordChangeTag
           else {
-            // Without an ancestor, the server record is upserted as-is. In the unlikely edge
-            // case where a matching client row exists, it gets overwritten.
+            // Without an ancestor we have no baseline to compare against; treat the server
+            // record as changed and let the conflict-resolution branches below decide
+            // (reconciliation if a local row exists, blind upsert otherwise).
             return true
           }
           return ancestorChangeTag != serverChangeTag
@@ -1966,13 +1967,18 @@
         guard hasServerChanged || force else { return }
 
         let hasClientChanged: Bool = {
-          // Without an ancestor, we can't detect client changes (no baseline to compare
-          // against). This effectively falls through to server wins.
-          guard let ancestorRecord else { return false }
+          // Without an ancestor, we treat the presence of a local row as a potential
+          // client change. The reconciliation path below handles the no-baseline case.
+          guard let ancestorRecord else { return true }
           return metadata.userModificationTime > ancestorRecord.userModificationTime
         }()
 
         let hasConflict = hasServerChanged && hasClientChanged
+        // Tracks whether we actually resolved a conflict (vs blindly upserted). Used to
+        // gate the post-resolution `userModificationTime` bookkeeping so a fresh device
+        // receiving its first server record for a row doesn't clobber the server's time
+        // with the freshly-inserted metadata's `0`.
+        var didResolveConflict = false
 
         func open<T>(_ table: some SynchronizableTable<T>) throws {
           do {
@@ -1981,6 +1987,7 @@
               let ancestorRecord,
               let row = try T.find(#sql("\(bind: metadata.recordPrimaryKey)")).fetchOne(db)
             {
+              didResolveConflict = true
               let ancestorVersion = try RowVersion<T>(
                 from: ancestorRecord,
                 db: db
@@ -1999,9 +2006,36 @@
                 server: serverVersion,
                 client: clientVersion
               )
-              
+
               try $_currentZoneID.withValue(serverRecord.recordID.zoneID) {
                 try #sql(conflict.makeUpdateQuery()).execute(db)
+              }
+            } else if
+              hasConflict && !force,
+              ancestorRecord == nil,
+              let row = try T.find(#sql("\(bind: metadata.recordPrimaryKey)")).fetchOne(db)
+            {
+              // Two-way reconciliation: both sides hold a row for the same primary key but
+              // share no ancestor. The server side carries per-field timestamps from the
+              // incoming CKRecord; the client side has only a row-level timestamp.
+              let serverVersion = try RowVersion<T>(
+                from: serverRecord,
+                db: db
+              )
+              let clientVersion = RowVersion<T>(
+                clientRow: T(queryOutput: row),
+                userModificationTime: metadata.userModificationTime
+              )
+              let conflict = ReconciliationConflict(
+                server: serverVersion,
+                client: clientVersion
+              )
+
+              if let updateQuery = conflict.makeUpdateQuery() {
+                didResolveConflict = true
+                try $_currentZoneID.withValue(serverRecord.recordID.zoneID) {
+                  try #sql(updateQuery).execute(db)
+                }
               }
             } else {
               try $_currentZoneID.withValue(serverRecord.recordID.zoneID) {
@@ -2019,7 +2053,7 @@
             // resolution has happened. The resolved record is then stored as the new last-known
             // server record, ensuring that per-field timestamps on the next upload reflect
             // the resolution time rather than the server's original timestamps.
-            if hasConflict {
+            if didResolveConflict {
               serverRecord.userModificationTime = metadata.userModificationTime
             }
             

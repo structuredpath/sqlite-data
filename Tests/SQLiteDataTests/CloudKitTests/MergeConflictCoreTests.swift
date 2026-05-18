@@ -85,8 +85,8 @@
         #expect(conflict.mergedValue(for: \.field4, policy: .latest) == "baz")
         // Scenario 5: Both changed, client newer
         #expect(conflict.mergedValue(for: \.field5, policy: .latest) == "bar")
-        // Scenario 6: Both changed, equal timestamps (client wins)
-        #expect(conflict.mergedValue(for: \.field6, policy: .latest) == "bar")
+        // Scenario 6: Both changed, equal timestamps (server wins)
+        #expect(conflict.mergedValue(for: \.field6, policy: .latest) == "baz")
         // Scenario 7: Both changed, same value
         #expect(conflict.mergedValue(for: \.field7, policy: .latest) == "bar")
       }
@@ -116,14 +116,14 @@
           assertInlineSnapshot(of: query, as: .sql) {
             """
             UPDATE "mergeModels"
-            SET "field1" = 'foo', "field2" = 'bar', "field3" = 'baz', "field4" = 'baz', "field5" = 'bar', "field6" = 'bar', "field7" = 'bar'
+            SET "field1" = 'foo', "field2" = 'bar', "field3" = 'baz', "field4" = 'baz', "field5" = 'bar', "field6" = 'baz', "field7" = 'bar'
             WHERE ("mergeModels"."id") = (0)
             """
           }
-          
+
           try query.execute(db)
           let merged = try MergeModel.fetchOne(db)!
-          
+
           #expect(merged == MergeModel(
             id: 0,
             field1: "foo",
@@ -131,7 +131,7 @@
             field3: "baz",
             field4: "baz",
             field5: "bar",
-            field6: "bar",
+            field6: "baz",
             field7: "bar"
           ))
         }
@@ -168,10 +168,10 @@
           )
           
           try Post.insert { conflict.client.row }.execute(db)
-          
+
           try #sql(conflict.makeUpdateQuery()).execute(db)
           let merged = try Post.fetchOne(db)!
-          
+
           // `FieldMergePolicy.latest` (default): "Hello from server" (server newer)
           #expect(merged.title == "Hello from server")
           // `FieldMergePolicy.counter`: 10 + (13 - 10) + (12 - 10) = 15
@@ -179,6 +179,93 @@
           // `FieldMergePolicy.set`: kept "foo", server removed "bar", client added "baz"
           #expect(merged.tags == ["foo", "baz"])
         }
+      }
+
+      // MARK: - ReconciliationConflict
+      //
+      // Unit-level coverage of the two-way reconciliation primitive. End-to-end coverage
+      // through the SyncEngine for the no-ancestor case lives in `MergeConflictTests`
+      // under the `reconciliation_*` tests.
+
+      @Test func reconciliationConflict_reconciledValues_clientNewer() {
+        let conflict = ReconciliationConflict(
+          server: RowVersion(
+            row: Post(id: 1, title: "Server title", body: "Server body"),
+            modificationTimes: [\.title: 30, \.body: 30, \.isPublished: 30]
+          ),
+          client: RowVersion(
+            row: Post(id: 1, title: "Client title", body: "Client body"),
+            modificationTimes: [\.title: 60, \.body: 60, \.isPublished: 60]
+          )
+        )
+
+        #expect(conflict.reconciledValue(for: \.title, policy: .latest) == "Client title")
+        #expect(conflict.reconciledValue(for: \.body, policy: .latest) == "Client body")
+      }
+
+      @Test func reconciliationConflict_reconciledValues_serverNewer() {
+        let conflict = ReconciliationConflict(
+          server: RowVersion(
+            row: Post(id: 1, title: "Server title", body: "Server body"),
+            modificationTimes: [\.title: 60, \.body: 60, \.isPublished: 60]
+          ),
+          client: RowVersion(
+            row: Post(id: 1, title: "Client title", body: "Client body"),
+            modificationTimes: [\.title: 30, \.body: 30, \.isPublished: 30]
+          )
+        )
+
+        #expect(conflict.reconciledValue(for: \.title, policy: .latest) == "Server title")
+        #expect(conflict.reconciledValue(for: \.body, policy: .latest) == "Server body")
+      }
+
+      @Test func reconciliationConflict_reconciledValues_equalTimestamps_serverWins() {
+        let conflict = ReconciliationConflict(
+          server: RowVersion(
+            row: Post(id: 1, title: "Server title"),
+            modificationTimes: [\.title: 60]
+          ),
+          client: RowVersion(
+            row: Post(id: 1, title: "Client title"),
+            modificationTimes: [\.title: 60]
+          )
+        )
+
+        #expect(conflict.reconciledValue(for: \.title, policy: .latest) == "Server title")
+      }
+
+      @Test func reconciliationConflict_reconciledValues_sameValue() {
+        let conflict = ReconciliationConflict(
+          server: RowVersion(
+            row: Post(id: 1, title: "Shared title"),
+            modificationTimes: [\.title: 60]
+          ),
+          client: RowVersion(
+            row: Post(id: 1, title: "Shared title"),
+            modificationTimes: [\.title: 30]
+          )
+        )
+
+        // Identical values short-circuit the policy.
+        #expect(conflict.reconciledValue(for: \.title, policy: .latest) == "Shared title")
+      }
+
+      @Test func reconciliationConflict_makeUpdateQuery_isNilForPrimaryKeyOnlyTables() {
+        // A table whose only writable column is the primary key has no meaningful merge:
+        // there is nothing to assign. `makeUpdateQuery()` returns nil rather than emit
+        // an UPDATE with an empty SET clause.
+        let conflict = ReconciliationConflict(
+          server: RowVersion(
+            row: Tag(title: "Swift"),
+            modificationTimes: [\.title: 60]
+          ),
+          client: RowVersion(
+            row: Tag(title: "Swift"),
+            modificationTimes: [\.title: 30]
+          )
+        )
+
+        #expect(conflict.makeUpdateQuery() == nil)
       }
     }
   }

@@ -1260,7 +1260,7 @@
           │ SyncedRow(                      │
           │   row: Post(                    │
           │     id: 1,                      │
-          │     title: "Hello from client", │
+          │     title: "Hello from server", │
           │     body: nil,                  │
           │     isPublished: false          │
           │   ),                            │
@@ -1284,7 +1284,7 @@
                 id🗓️: 0,
                 isPublished: 0,
                 isPublished🗓️: 0,
-                title: "Hello from client",
+                title: "Hello from server",
                 title🗓️: 60,
                 🗓️: 60
               )
@@ -2000,11 +2000,9 @@
         // Step 4: Send (merged result)
         try await syncEngine.processPendingRecordZoneChanges(scope: .private)
 
-        await withKnownIssue("Client's newer value should win with no last-known server record") {
-          try await userDatabase.read { db in
-            let post = try #require(try Post.find(1).fetchOne(db))
-            #expect(post.title == "Hello from client")
-          }
+        try await userDatabase.read { db in
+          let post = try #require(try Post.find(1).fetchOne(db))
+          #expect(post.title == "Hello from client")
         }
       }
 
@@ -2097,11 +2095,9 @@
         // Step 4: Fetch arrives (conflict, no ancestor for merge)
         await fetchedRecordZoneChangesCallback.notify()
 
-        await withKnownIssue("Client's newer value should win with no last-known server record") {
-          try await userDatabase.read { db in
-            let post = try #require(try Post.find(1).fetchOne(db))
-            #expect(post.title == "Hello from client")
-          }
+        try await userDatabase.read { db in
+          let post = try #require(try Post.find(1).fetchOne(db))
+          #expect(post.title == "Hello from client")
         }
       }
 
