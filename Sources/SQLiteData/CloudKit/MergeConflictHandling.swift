@@ -210,12 +210,12 @@
       self.client = client
     }
 
-    /// Resolves a field conflict by key path, delegating to `mergedValue(column:policy:)`.
-    package func mergedValue<C: WritableTableColumnExpression>(
+    /// Resolves a field conflict by key path, delegating to `resolvedValue(column:policy:)`.
+    package func resolvedValue<C: WritableTableColumnExpression>(
       for keyPath: some KeyPath<T.TableColumns, C>,
       policy: FieldMergePolicy<C.QueryValue.QueryOutput>
     ) -> C.QueryValue.QueryOutput where C.Root == T {
-      mergedValue(
+      resolvedValue(
         column: T.columns[keyPath: keyPath],
         policy: policy
       )
@@ -223,7 +223,7 @@
     
     /// Resolves a field conflict by column, applying the given merge policy. Falls through to
     /// the client or server value when only one side changed.
-    package func mergedValue<C: WritableTableColumnExpression>(
+    package func resolvedValue<C: WritableTableColumnExpression>(
       column: C,
       policy: FieldMergePolicy<C.QueryValue.QueryOutput>
     ) -> C.QueryValue.QueryOutput where C.Root == T {
@@ -272,8 +272,8 @@
           guard column.name != T.primaryKey.name else { return nil }
           let column = column as! (any WritableTableColumnExpression<T, Value>)
           let policy = policy(for: column.keyPath)
-          let merged = mergedValue(column: column, policy: policy)
-          return (column: column.name, value: Value(queryOutput: merged).queryBinding)
+          let resolved = resolvedValue(column: column, policy: policy)
+          return (column: column.name, value: Value(queryOutput: resolved).queryBinding)
         }
         return open(column)
       }
