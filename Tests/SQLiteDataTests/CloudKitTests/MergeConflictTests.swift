@@ -1262,7 +1262,7 @@
           │ SyncedRow(                      │
           │   row: Post(                    │
           │     id: 1,                      │
-          │     title: "Hello from client", │
+          │     title: "Hello from server", │
           │     body: nil,                  │
           │     isPublished: false          │
           │   ),                            │
@@ -1286,7 +1286,7 @@
                 id🗓️: 0,
                 isPublished: 0,
                 isPublished🗓️: 0,
-                title: "Hello from client",
+                title: "Hello from server",
                 title🗓️: 60,
                 🗓️: 60
               )

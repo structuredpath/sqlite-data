@@ -58,10 +58,10 @@
 
   extension FieldMergePolicy {
     /// Last-edit-wins merge policy that picks the edited value with the newer modification
-    /// timestamp (ties favor the client).
+    /// timestamp (ties favor the server).
     public static var latest: Self {
       Self { _, server, client in
-        server.modificationTime > client.modificationTime ? server.value : client.value
+        client.modificationTime > server.modificationTime ? client.value : server.value
       }
     }
   }

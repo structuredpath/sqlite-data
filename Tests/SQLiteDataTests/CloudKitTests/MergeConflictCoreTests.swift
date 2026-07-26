@@ -86,8 +86,8 @@
         #expect(conflict.mergedValue(for: \.field4, policy: .latest) == "baz")
         // Scenario 5: Both changed, client newer
         #expect(conflict.mergedValue(for: \.field5, policy: .latest) == "bar")
-        // Scenario 6: Both changed, equal timestamps (client wins)
-        #expect(conflict.mergedValue(for: \.field6, policy: .latest) == "bar")
+        // Scenario 6: Both changed, equal timestamps (server wins)
+        #expect(conflict.mergedValue(for: \.field6, policy: .latest) == "baz")
         // Scenario 7: Both changed, same value
         #expect(conflict.mergedValue(for: \.field7, policy: .latest) == "bar")
       }
@@ -117,7 +117,7 @@
           assertInlineSnapshot(of: query, as: .sql) {
             """
             UPDATE "mergeModels"
-            SET "field1" = 'foo', "field2" = 'bar', "field3" = 'baz', "field4" = 'baz', "field5" = 'bar', "field6" = 'bar', "field7" = 'bar'
+            SET "field1" = 'foo', "field2" = 'bar', "field3" = 'baz', "field4" = 'baz', "field5" = 'bar', "field6" = 'baz', "field7" = 'bar'
             WHERE ("mergeModels"."id") = (0)
             """
           }
@@ -132,7 +132,7 @@
             field3: "baz",
             field4: "baz",
             field5: "bar",
-            field6: "bar",
+            field6: "baz",
             field7: "bar"
           ))
         }
