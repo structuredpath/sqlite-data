@@ -81,17 +81,47 @@
     }
   }
 
+  /// A strategy for reconciling a counter field when no shared ancestor is available.
+  public struct CounterFieldReconciliationStrategy<Value: BinaryInteger> {
+    package let reconcile: (
+      _ server: FieldVersion<Value>,
+      _ client: FieldVersion<Value>
+    ) -> Value
+
+    public init(
+      _ reconcile: @escaping (
+        _ server: FieldVersion<Value>,
+        _ client: FieldVersion<Value>
+      ) -> Value
+    ) {
+      self.reconcile = reconcile
+    }
+
+    /// Picks the count with the newer modification timestamp (ties favor the server). Without
+    /// an ancestor, the deltas cannot be reconstructed from the absolute counts.
+    public static var latest: Self {
+      Self(FieldMergePolicy<Value>.latest.reconcile)
+    }
+  }
+
   extension FieldMergePolicy where Value: BinaryInteger {
     /// Counter merge policy that combines the independent increments and decrements from
-    /// both edited values.
+    /// both edited values. Reconciliation picks the count with the newer modification timestamp.
     public static var counter: Self {
+      .counter(reconciliation: .latest)
+    }
+
+    /// Counter merge policy that combines the independent increments and decrements from
+    /// both edited values. Without an ancestor, the deltas cannot be reconstructed, so
+    /// reconciliation follows the given strategy.
+    public static func counter(reconciliation strategy: CounterFieldReconciliationStrategy<Value>) -> Self {
       Self(
         merge: { ancestor, server, client in
           ancestor.value
             + (server.value - ancestor.value)
             + (client.value - ancestor.value)
         },
-        reconcile: { _, _ in fatalError() }
+        reconcile: strategy.reconcile
       )
     }
   }
