@@ -14,7 +14,7 @@
   extension BaseCloudKitTests {
     @MainActor
     @Suite($attachMetadatabase.set(true), .taskLocal(CKRecord._$printTimestamps, true))
-    final class MergeConflictTests: BaseCloudKitTests, @unchecked Sendable {
+    final class ConflictTests: BaseCloudKitTests, @unchecked Sendable {
 
       // MARK: - Different Fields Change
 

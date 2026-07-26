@@ -4,13 +4,13 @@
   import IssueReporting
   import StructuredQueriesCore
 
-  public protocol CustomMergeConflictResolvable: PrimaryKeyedTable
+  public protocol CustomConflictResolvable: PrimaryKeyedTable
     where TableColumns.PrimaryColumn: WritableTableColumnExpression
   {
-    static var mergePolicies: MergePolicyRegistry<Self> { get }
+    static var fieldPolicies: FieldConflictPolicyRegistry<Self> { get }
   }
 
-  public struct MergePolicyRegistry<T> {
+  public struct FieldConflictPolicyRegistry<T> {
     private var storage: [PartialKeyPath<T>: Any] = [:]
 
     public init(_ build: (inout Self) -> Void) {
@@ -19,13 +19,13 @@
 
     public subscript<Value>(
       keyPath: KeyPath<T, Value>
-    ) -> FieldMergePolicy<Value>? {
-      get { storage[keyPath] as? FieldMergePolicy<Value> }
+    ) -> FieldConflictPolicy<Value>? {
+      get { storage[keyPath] as? FieldConflictPolicy<Value> }
       set { storage[keyPath] = newValue as Any? }
     }
   }
 
-  public struct FieldMergePolicy<Value> {
+  public struct FieldConflictPolicy<Value> {
     public init(
       merge: @escaping (
         _ ancestor: FieldVersion<Value>,
@@ -71,8 +71,8 @@
     ) -> Value
   }
 
-  extension FieldMergePolicy {
-    /// Last-edit-wins merge policy that picks the edited value with the newer modification
+  extension FieldConflictPolicy {
+    /// Last-edit-wins conflict policy that picks the edited value with the newer modification
     /// timestamp (ties favor the server).
     public static var latest: Self {
       Self { server, client in
@@ -100,18 +100,18 @@
     /// Picks the count with the newer modification timestamp (ties favor the server). Without
     /// an ancestor, the deltas cannot be reconstructed from the absolute counts.
     public static var latest: Self {
-      Self(FieldMergePolicy<Value>.latest.reconcile)
+      Self(FieldConflictPolicy<Value>.latest.reconcile)
     }
   }
 
-  extension FieldMergePolicy where Value: BinaryInteger {
-    /// Counter merge policy that combines the independent increments and decrements from
+  extension FieldConflictPolicy where Value: BinaryInteger {
+    /// Counter conflict policy that combines the independent increments and decrements from
     /// both edited values. Reconciliation picks the count with the newer modification timestamp.
     public static var counter: Self {
       .counter(reconciliation: .latest)
     }
 
-    /// Counter merge policy that combines the independent increments and decrements from
+    /// Counter conflict policy that combines the independent increments and decrements from
     /// both edited values. Without an ancestor, the deltas cannot be reconstructed, so
     /// reconciliation follows the given strategy.
     public static func counter(reconciliation strategy: CounterFieldReconciliationStrategy<Value>) -> Self {
@@ -153,18 +153,18 @@
     /// Picks the set with the newer modification timestamp (ties favor the server). Suited
     /// to sets where resurrecting removed elements is unacceptable.
     public static var latest: Self {
-      Self(FieldMergePolicy<Value>.latest.reconcile)
+      Self(FieldConflictPolicy<Value>.latest.reconcile)
     }
   }
 
-  extension FieldMergePolicy where Value: SetAlgebra, Value.Element: Equatable {
-    /// Set merge policy that preserves elements not deleted on either side and adds new elements
+  extension FieldConflictPolicy where Value: SetAlgebra, Value.Element: Equatable {
+    /// Set conflict policy that preserves elements not deleted on either side and adds new elements
     /// from both sides. Reconciliation unions both sides.
     public static var set: Self {
       .set(reconciliation: .union)
     }
 
-    /// Set merge policy that preserves elements not deleted on either side and adds new elements
+    /// Set conflict policy that preserves elements not deleted on either side and adds new elements
     /// from both sides. Without an ancestor, deletions cannot be detected, so reconciliation
     /// follows the given strategy.
     public static func set(reconciliation strategy: SetFieldReconciliationStrategy<Value>) -> Self {
@@ -193,7 +193,7 @@
     public let modificationTime: Int64
   }
 
-  /// A row-level conflict that resolves each field against a per-field merge policy and can
+  /// A row-level conflict that resolves each field against a per-field conflict policy and can
   /// generate an UPDATE statement applying the resolution.
   @available(iOS 16, macOS 13, tvOS 16, watchOS 9, *)
   package protocol RowConflict<T> {
@@ -203,10 +203,10 @@
     /// The primary key of the conflicting row, targeted by the update statement.
     var primaryKey: T.PrimaryKey.QueryOutput { get }
 
-    /// Resolves a field conflict by column, applying the given merge policy.
+    /// Resolves a field conflict by column, applying the given conflict policy.
     func resolvedValue<C: WritableTableColumnExpression>(
       column: C,
-      policy: FieldMergePolicy<C.QueryValue.QueryOutput>
+      policy: FieldConflictPolicy<C.QueryValue.QueryOutput>
     ) -> C.QueryValue.QueryOutput where C.Root == T
   }
 
@@ -215,7 +215,7 @@
     /// Resolves a field conflict by key path, delegating to `resolvedValue(column:policy:)`.
     package func resolvedValue<C: WritableTableColumnExpression>(
       for keyPath: some KeyPath<T.TableColumns, C>,
-      policy: FieldMergePolicy<C.QueryValue.QueryOutput>
+      policy: FieldConflictPolicy<C.QueryValue.QueryOutput>
     ) -> C.QueryValue.QueryOutput where C.Root == T {
       resolvedValue(
         column: T.columns[keyPath: keyPath],
@@ -224,7 +224,7 @@
     }
 
     /// Generates an UPDATE statement that resolves the conflict, using per-field policies
-    /// from `CustomMergeConflictResolvable` when available, falling back to `.latest`.
+    /// from `CustomConflictResolvable` when available, falling back to `.latest`.
     ///
     /// Returns `nil` when the table has no writable columns besides the primary key, in which
     /// case there is nothing to resolve.
@@ -250,15 +250,15 @@
         """
     }
 
-    /// Resolves the merge policy for the given column from `CustomMergeConflictResolvable`,
+    /// Resolves the conflict policy for the given column from `CustomConflictResolvable`,
     /// falling back to `.latest`.
     private func policy<Value>(
       for keyPath: KeyPath<T, Value>
-    ) -> FieldMergePolicy<Value> {
-      func open<U: CustomMergeConflictResolvable>(_ table: U.Type) -> FieldMergePolicy<Value>? {
-        table.mergePolicies[keyPath as! KeyPath<U, Value>]
+    ) -> FieldConflictPolicy<Value> {
+      func open<U: CustomConflictResolvable>(_ table: U.Type) -> FieldConflictPolicy<Value>? {
+        table.fieldPolicies[keyPath as! KeyPath<U, Value>]
       }
-      if let table = T.self as? any CustomMergeConflictResolvable.Type, let policy = open(table) {
+      if let table = T.self as? any CustomConflictResolvable.Type, let policy = open(table) {
         return policy
       }
       return .latest
@@ -288,11 +288,11 @@
       client.row.primaryKey
     }
 
-    /// Resolves a field conflict by column, applying the given merge policy. Falls through to
+    /// Resolves a field conflict by column, applying the given conflict policy. Falls through to
     /// the client or server value when only one side changed.
     package func resolvedValue<C: WritableTableColumnExpression>(
       column: C,
-      policy: FieldMergePolicy<C.QueryValue.QueryOutput>
+      policy: FieldConflictPolicy<C.QueryValue.QueryOutput>
     ) -> C.QueryValue.QueryOutput where C.Root == T {
       let keyPath = column.keyPath
       let ancestorValue = ancestor.row[keyPath: keyPath]
