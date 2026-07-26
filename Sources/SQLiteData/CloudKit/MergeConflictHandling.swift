@@ -41,6 +41,20 @@
       self.reconcile = reconcile
     }
 
+    /// Creates a policy from a resolution that does not depend on the ancestor version.
+    /// The same resolution is applied in three-way merges and in two-way reconciliation.
+    public init(
+      _ resolve: @escaping (
+        _ server: FieldVersion<Value>,
+        _ client: FieldVersion<Value>
+      ) -> Value
+    ) {
+      self.init(
+        merge: { _, server, client in resolve(server, client) },
+        reconcile: resolve
+      )
+    }
+
     /// Resolves a field conflict given the ancestor, server, and client versions.
     public let merge: (
       _ ancestor: FieldVersion<Value>,
@@ -61,12 +75,9 @@
     /// Last-edit-wins merge policy that picks the edited value with the newer modification
     /// timestamp (ties favor the server).
     public static var latest: Self {
-      Self(
-        merge: { _, server, client in
-          client.modificationTime > server.modificationTime ? client.value : server.value
-        },
-        reconcile: { _, _ in fatalError() }
-      )
+      Self { server, client in
+        client.modificationTime > server.modificationTime ? client.value : server.value
+      }
     }
   }
 
