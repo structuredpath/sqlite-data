@@ -193,9 +193,82 @@
     public let modificationTime: Int64
   }
 
+  /// A row-level conflict that resolves each field against a per-field merge policy and can
+  /// generate an UPDATE statement applying the resolution.
+  @available(iOS 16, macOS 13, tvOS 16, watchOS 9, *)
+  package protocol RowConflict<T> {
+    associatedtype T: PrimaryKeyedTable
+    where T.TableColumns.PrimaryColumn: WritableTableColumnExpression
+
+    /// The primary key of the conflicting row, targeted by the update statement.
+    var primaryKey: T.PrimaryKey.QueryOutput { get }
+
+    /// Resolves a field conflict by column, applying the given merge policy.
+    func resolvedValue<C: WritableTableColumnExpression>(
+      column: C,
+      policy: FieldMergePolicy<C.QueryValue.QueryOutput>
+    ) -> C.QueryValue.QueryOutput where C.Root == T
+  }
+
+  @available(iOS 16, macOS 13, tvOS 16, watchOS 9, *)
+  extension RowConflict {
+    /// Resolves a field conflict by key path, delegating to `resolvedValue(column:policy:)`.
+    package func resolvedValue<C: WritableTableColumnExpression>(
+      for keyPath: some KeyPath<T.TableColumns, C>,
+      policy: FieldMergePolicy<C.QueryValue.QueryOutput>
+    ) -> C.QueryValue.QueryOutput where C.Root == T {
+      resolvedValue(
+        column: T.columns[keyPath: keyPath],
+        policy: policy
+      )
+    }
+
+    /// Generates an UPDATE statement that resolves the conflict, using per-field policies
+    /// from `CustomMergeConflictResolvable` when available, falling back to `.latest`.
+    ///
+    /// Returns `nil` when the table has no writable columns besides the primary key, in which
+    /// case there is nothing to resolve.
+    package func makeUpdateQuery() -> QueryFragment? {
+      let assignments = T.TableColumns.writableColumns.compactMap { column in
+        func open<Root, Value>(
+          _ column: some WritableTableColumnExpression<Root, Value>
+        ) -> (column: String, value: QueryBinding)? {
+          guard column.name != T.primaryKey.name else { return nil }
+          let column = column as! (any WritableTableColumnExpression<T, Value>)
+          let policy = policy(for: column.keyPath)
+          let resolved = resolvedValue(column: column, policy: policy)
+          return (column: column.name, value: Value(queryOutput: resolved).queryBinding)
+        }
+        return open(column)
+      }
+      guard !assignments.isEmpty else { return nil }
+
+      return """
+        UPDATE \(T.self)
+        SET \(assignments.map { "\(quote: $0.column) = \($0.value)" }.joined(separator: ", "))
+        WHERE (\(T.primaryKey)) = (\(T.PrimaryKey(queryOutput: primaryKey)))
+        """
+    }
+
+    /// Resolves the merge policy for the given column from `CustomMergeConflictResolvable`,
+    /// falling back to `.latest`.
+    private func policy<Value>(
+      for keyPath: KeyPath<T, Value>
+    ) -> FieldMergePolicy<Value> {
+      func open<U: CustomMergeConflictResolvable>(_ table: U.Type) -> FieldMergePolicy<Value>? {
+        table.mergePolicies[keyPath as! KeyPath<U, Value>]
+      }
+      if let table = T.self as? any CustomMergeConflictResolvable.Type, let policy = open(table) {
+        return policy
+      }
+      return .latest
+    }
+  }
+
   /// A three-way merge conflict between an ancestor, server, and client version of a row.
   @available(iOS 16, macOS 13, tvOS 16, watchOS 9, *)
-  package struct MergeConflict<T: PrimaryKeyedTable> where T.TableColumns.PrimaryColumn: WritableTableColumnExpression {
+  package struct MergeConflict<T: PrimaryKeyedTable>: RowConflict
+  where T.TableColumns.PrimaryColumn: WritableTableColumnExpression {
     package let ancestor: RowVersion<T>
     package let server: RowVersion<T>
     package let client: RowVersion<T>
@@ -210,17 +283,11 @@
       self.client = client
     }
 
-    /// Resolves a field conflict by key path, delegating to `resolvedValue(column:policy:)`.
-    package func resolvedValue<C: WritableTableColumnExpression>(
-      for keyPath: some KeyPath<T.TableColumns, C>,
-      policy: FieldMergePolicy<C.QueryValue.QueryOutput>
-    ) -> C.QueryValue.QueryOutput where C.Root == T {
-      resolvedValue(
-        column: T.columns[keyPath: keyPath],
-        policy: policy
-      )
+    /// The primary key of the conflicting row, shared by all three versions.
+    package var primaryKey: T.PrimaryKey.QueryOutput {
+      client.row.primaryKey
     }
-    
+
     /// Resolves a field conflict by column, applying the given merge policy. Falls through to
     /// the client or server value when only one side changed.
     package func resolvedValue<C: WritableTableColumnExpression>(
@@ -257,45 +324,6 @@
         )
         return policy.merge(ancestorField, serverField, clientField)
       }
-    }
-
-    /// Generates an UPDATE statement that resolves the merge conflict, using per-field policies
-    /// from `CustomMergeConflictResolvable` when available, falling back to `.latest`.
-    ///
-    /// Returns `nil` when the table has no writable columns besides the primary key, in which
-    /// case there is nothing to resolve.
-    package func makeUpdateQuery() -> QueryFragment? {
-      let assignments = T.TableColumns.writableColumns.compactMap { column in
-        func open<Root, Value>(
-          _ column: some WritableTableColumnExpression<Root, Value>
-        ) -> (column: String, value: QueryBinding)? {
-          guard column.name != T.primaryKey.name else { return nil }
-          let column = column as! (any WritableTableColumnExpression<T, Value>)
-          let policy = policy(for: column.keyPath)
-          let resolved = resolvedValue(column: column, policy: policy)
-          return (column: column.name, value: Value(queryOutput: resolved).queryBinding)
-        }
-        return open(column)
-      }
-      guard !assignments.isEmpty else { return nil }
-
-      return """
-        UPDATE \(T.self)
-        SET \(assignments.map { "\(quote: $0.column) = \($0.value)" }.joined(separator: ", "))
-        WHERE (\(T.primaryKey)) = (\(T.PrimaryKey(queryOutput: ancestor.row.primaryKey)))
-        """
-    }
-    
-    private func policy<Value>(
-      for keyPath: KeyPath<T, Value>
-    ) -> FieldMergePolicy<Value> {
-      func open<U: CustomMergeConflictResolvable>(_ table: U.Type) -> FieldMergePolicy<Value>? {
-        table.mergePolicies[keyPath as! KeyPath<U, Value>]
-      }
-      if let table = T.self as? any CustomMergeConflictResolvable.Type, let policy = open(table) {
-        return policy
-      }
-      return .latest
     }
   }
 
