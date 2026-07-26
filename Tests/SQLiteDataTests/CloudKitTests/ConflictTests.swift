@@ -14,8 +14,8 @@
   extension BaseCloudKitTests {
     @MainActor
     @Suite(.taskLocal($attachMetadatabase, true), .taskLocal(CKRecord._$printTimestamps, true))
-    final class MergeConflictTests: BaseCloudKitTests, @unchecked Sendable {
-      
+    final class ConflictTests: BaseCloudKitTests, @unchecked Sendable {
+
       // MARK: - Different Fields Change
 
       @Test func differentFieldsChange_conflictOnSend_clientNewer() async throws {

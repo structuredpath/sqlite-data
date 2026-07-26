@@ -10,7 +10,7 @@
   extension BaseCloudKitTests {
     @MainActor
     @Suite($attachMetadatabase.set(true))
-    final class MergeConflictCoreTests: BaseCloudKitTests, @unchecked Sendable {
+    final class ConflictCoreTests: BaseCloudKitTests, @unchecked Sendable {
 
       // MARK: - RowVersion
 
@@ -138,8 +138,8 @@
         }
       }
       
-      @Test func mergeConflict_resolutionRoundtrip_customMergePolicies() throws {
-        typealias Post = Post_CustomMergeConflictResolvable
+      @Test func mergeConflict_resolutionRoundtrip_customPolicies() throws {
+        typealias Post = Post_CustomConflictResolvable
         
         try userDatabase.write { db in
           try #sql(
@@ -173,11 +173,11 @@
           try #sql(#require(conflict.makeUpdateQuery())).execute(db)
           let merged = try Post.fetchOne(db)!
           
-          // `FieldMergePolicy.latest` (default): "Hello from server" (server newer)
+          // `FieldConflictPolicy.latest` (default): "Hello from server" (server newer)
           #expect(merged.title == "Hello from server")
-          // `FieldMergePolicy.counter`: 10 + (13 - 10) + (12 - 10) = 15
+          // `FieldConflictPolicy.counter`: 10 + (13 - 10) + (12 - 10) = 15
           #expect(merged.likes == 15)
-          // `FieldMergePolicy.set`: kept "foo", server removed "bar", client added "baz"
+          // `FieldConflictPolicy.set`: kept "foo", server removed "bar", client added "baz"
           #expect(merged.tags == ["foo", "baz"])
         }
       }
@@ -192,7 +192,7 @@
   }
 
   @Table("customPosts")
-  private struct Post_CustomMergeConflictResolvable: Equatable {
+  private struct Post_CustomConflictResolvable: Equatable {
     let id: Int
     var title: String
     var likes: Int
@@ -200,9 +200,9 @@
     var tags: Set<String>
   }
 
-  extension Post_CustomMergeConflictResolvable: CustomMergeConflictResolvable {
-    static var mergePolicies: MergePolicyRegistry<Self> {
-      MergePolicyRegistry<Self> {
+  extension Post_CustomConflictResolvable: CustomConflictResolvable {
+    static var fieldPolicies: FieldConflictPolicyRegistry<Self> {
+      FieldConflictPolicyRegistry<Self> {
         $0[\.likes] = .counter
         $0[\.tags] = .set
       }
