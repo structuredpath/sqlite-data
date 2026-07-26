@@ -73,23 +73,23 @@
 
       // MARK: - MergeConflict
 
-      @Test func mergeConflict_mergedValues_canonicalConflict() {
+      @Test func mergeConflict_resolvedValues_canonicalConflict() {
         let conflict = MergeModel.makeCanonicalConflict()
 
         // Scenario 1: No changes
-        #expect(conflict.mergedValue(for: \.field1, policy: .latest) == "foo")
+        #expect(conflict.resolvedValue(for: \.field1, policy: .latest) == "foo")
         // Scenario 2: Client-only change
-        #expect(conflict.mergedValue(for: \.field2, policy: .latest) == "bar")
+        #expect(conflict.resolvedValue(for: \.field2, policy: .latest) == "bar")
         // Scenario 3: Server-only change
-        #expect(conflict.mergedValue(for: \.field3, policy: .latest) == "baz")
+        #expect(conflict.resolvedValue(for: \.field3, policy: .latest) == "baz")
         // Scenario 4: Both changed, server newer
-        #expect(conflict.mergedValue(for: \.field4, policy: .latest) == "baz")
+        #expect(conflict.resolvedValue(for: \.field4, policy: .latest) == "baz")
         // Scenario 5: Both changed, client newer
-        #expect(conflict.mergedValue(for: \.field5, policy: .latest) == "bar")
+        #expect(conflict.resolvedValue(for: \.field5, policy: .latest) == "bar")
         // Scenario 6: Both changed, equal timestamps (server wins)
-        #expect(conflict.mergedValue(for: \.field6, policy: .latest) == "baz")
+        #expect(conflict.resolvedValue(for: \.field6, policy: .latest) == "baz")
         // Scenario 7: Both changed, same value
-        #expect(conflict.mergedValue(for: \.field7, policy: .latest) == "bar")
+        #expect(conflict.resolvedValue(for: \.field7, policy: .latest) == "bar")
       }
         
       @Test func mergeConflict_resolutionRoundtrip_canonicalConflict() throws {
