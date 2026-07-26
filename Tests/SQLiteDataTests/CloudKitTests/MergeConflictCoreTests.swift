@@ -112,7 +112,7 @@
           let conflict = MergeModel.makeCanonicalConflict()
           try MergeModel.insert { conflict.client.row }.execute(db)
           
-          let query = #sql(conflict.makeUpdateQuery(), as: Void.self)
+          let query = #sql(try #require(conflict.makeUpdateQuery()), as: Void.self)
           
           assertInlineSnapshot(of: query, as: .sql) {
             """
@@ -170,7 +170,7 @@
           
           try Post.insert { conflict.client.row }.execute(db)
           
-          try #sql(conflict.makeUpdateQuery()).execute(db)
+          try #sql(#require(conflict.makeUpdateQuery())).execute(db)
           let merged = try Post.fetchOne(db)!
           
           // `FieldMergePolicy.latest` (default): "Hello from server" (server newer)
@@ -180,6 +180,13 @@
           // `FieldMergePolicy.set`: kept "foo", server removed "bar", client added "baz"
           #expect(merged.tags == ["foo", "baz"])
         }
+      }
+
+      @Test func mergeConflict_makeUpdateQuery_isNilForPrimaryKeyOnlyTables() {
+        let version = RowVersion(row: Tag(title: "Swift"), modificationTimes: [:])
+        let conflict = MergeConflict(ancestor: version, server: version, client: version)
+
+        #expect(conflict.makeUpdateQuery() == nil)
       }
     }
   }
