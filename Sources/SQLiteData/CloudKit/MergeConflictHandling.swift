@@ -96,10 +96,48 @@
     }
   }
 
+  /// A strategy for reconciling a set field when no shared ancestor is available.
+  public struct SetFieldReconciliationStrategy<Value: SetAlgebra> where Value.Element: Equatable {
+    package let reconcile: (
+      _ server: FieldVersion<Value>,
+      _ client: FieldVersion<Value>
+    ) -> Value
+
+    public init(
+      _ reconcile: @escaping (
+        _ server: FieldVersion<Value>,
+        _ client: FieldVersion<Value>
+      ) -> Value
+    ) {
+      self.reconcile = reconcile
+    }
+
+    /// Unions both sides. Without an ancestor, no element is known to have been deleted, so
+    /// this preserves every element at the cost of possibly resurrecting deletions.
+    public static var union: Self {
+      Self { server, client in
+        server.value.union(client.value)
+      }
+    }
+
+    /// Picks the set with the newer modification timestamp (ties favor the server). Suited
+    /// to sets where resurrecting removed elements is unacceptable.
+    public static var latest: Self {
+      Self(FieldMergePolicy<Value>.latest.reconcile)
+    }
+  }
+
   extension FieldMergePolicy where Value: SetAlgebra, Value.Element: Equatable {
     /// Set merge policy that preserves elements not deleted on either side and adds new elements
-    /// from both sides.
+    /// from both sides. Reconciliation unions both sides.
     public static var set: Self {
+      .set(reconciliation: .union)
+    }
+
+    /// Set merge policy that preserves elements not deleted on either side and adds new elements
+    /// from both sides. Without an ancestor, deletions cannot be detected, so reconciliation
+    /// follows the given strategy.
+    public static func set(reconciliation strategy: SetFieldReconciliationStrategy<Value>) -> Self {
       Self(
         merge: { ancestor, server, client in
           let notDeleted = ancestor.value
@@ -113,7 +151,7 @@
             .union(addedByServer)
             .union(addedByClient)
         },
-        reconcile: { _, _ in fatalError() }
+        reconcile: strategy.reconcile
       )
     }
   }
