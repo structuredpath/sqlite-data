@@ -63,8 +63,9 @@
     ) -> Value
 
     /// Resolves a field conflict between the server and client versions when no shared
-    /// ancestor is available, e.g. when both sides independently created a row with the
-    /// same primary key before ever synchronizing.
+    /// ancestor is available, e.g. when re-signing into iCloud after the sync metadata
+    /// was cleared while the user data was kept or when both sides independently created
+    /// a row with the same primary key before ever synchronizing.
     public let reconcile: (
       _ server: FieldVersion<Value>,
       _ client: FieldVersion<Value>
@@ -283,7 +284,7 @@
       self.client = client
     }
 
-    /// The primary key of the conflicting row, shared by all three versions.
+    /// The primary key of the conflicting row.
     package var primaryKey: T.PrimaryKey.QueryOutput {
       client.row.primaryKey
     }
@@ -334,6 +335,69 @@
         self,
         children: [
           ("ancestor", ancestor),
+          ("server", server),
+          ("client", client),
+        ],
+        displayStyle: .struct
+      )
+    }
+  }
+
+  /// A two-way reconciliation conflict between a server and client version of a row when no
+  /// shared ancestor is available, e.g. when re-signing into iCloud after the sync metadata
+  /// was cleared while the user data was kept or when both sides independently created a row
+  /// with the same primary key before ever synchronizing.
+  @available(iOS 16, macOS 13, tvOS 16, watchOS 9, *)
+  package struct ReconciliationConflict<T: PrimaryKeyedTable>: RowConflict
+  where T.TableColumns.PrimaryColumn: WritableTableColumnExpression {
+    package let server: RowVersion<T>
+    package let client: RowVersion<T>
+
+    package init(
+      server: RowVersion<T>,
+      client: RowVersion<T>
+    ) {
+      self.server = server
+      self.client = client
+    }
+
+      /// The primary key of the conflicting row.
+    package var primaryKey: T.PrimaryKey.QueryOutput {
+      client.row.primaryKey
+    }
+
+    /// Resolves a field conflict by column, applying the given conflict policy. Falls through
+    /// to the shared value when both sides agree.
+    package func resolvedValue<C: WritableTableColumnExpression>(
+      column: C,
+      policy: FieldConflictPolicy<C.QueryValue.QueryOutput>
+    ) -> C.QueryValue.QueryOutput where C.Root == T {
+      let keyPath = column.keyPath
+      let clientValue = client.row[keyPath: keyPath]
+      let serverValue = server.row[keyPath: keyPath]
+
+      if areEqual(clientValue, serverValue, as: C.QueryValue.self) {
+        return clientValue
+      }
+
+      let clientField = FieldVersion(
+        value: clientValue,
+        modificationTime: client.modificationTime(for: keyPath)
+      )
+      let serverField = FieldVersion(
+        value: serverValue,
+        modificationTime: server.modificationTime(for: keyPath)
+      )
+      return policy.reconcile(serverField, clientField)
+    }
+  }
+
+  @available(iOS 16, macOS 13, tvOS 16, watchOS 9, *)
+  extension ReconciliationConflict: CustomDumpReflectable {
+    package var customDumpMirror: Mirror {
+      Mirror(
+        self,
+        children: [
           ("server", server),
           ("client", client),
         ],
