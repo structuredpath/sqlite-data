@@ -11,7 +11,7 @@
   }
 
   public struct MergePolicyRegistry<T> {
-    private var storage: [PartialKeyPath<T>: (Any, Any, Any) -> Any] = [:]
+    private var storage: [PartialKeyPath<T>: Any] = [:]
 
     public init(_ build: (inout Self) -> Void) {
       build(&self)
@@ -20,37 +20,38 @@
     public subscript<Value>(
       keyPath: KeyPath<T, Value>
     ) -> FieldMergePolicy<Value>? {
-      get {
-        guard let merge = storage[keyPath] else { return nil }
-        return FieldMergePolicy { merge($0, $1, $2) as! Value }
-      }
-      set {
-        storage[keyPath] = newValue.map { policy in
-          {
-            policy.merge(
-              $0 as! FieldVersion<Value>,
-              $1 as! FieldVersion<Value>,
-              $2 as! FieldVersion<Value>
-            )
-          }
-        }
-      }
+      get { storage[keyPath] as? FieldMergePolicy<Value> }
+      set { storage[keyPath] = newValue as Any? }
     }
   }
 
   public struct FieldMergePolicy<Value> {
     public init(
-      _ merge: @escaping (
+      merge: @escaping (
         _ ancestor: FieldVersion<Value>,
+        _ server: FieldVersion<Value>,
+        _ client: FieldVersion<Value>
+      ) -> Value,
+      reconcile: @escaping (
         _ server: FieldVersion<Value>,
         _ client: FieldVersion<Value>
       ) -> Value
     ) {
       self.merge = merge
+      self.reconcile = reconcile
     }
-      
+
+    /// Resolves a field conflict given the ancestor, server, and client versions.
     public let merge: (
       _ ancestor: FieldVersion<Value>,
+      _ server: FieldVersion<Value>,
+      _ client: FieldVersion<Value>
+    ) -> Value
+
+    /// Resolves a field conflict between the server and client versions when no shared
+    /// ancestor is available, e.g. when both sides independently created a row with the
+    /// same primary key before ever synchronizing.
+    public let reconcile: (
       _ server: FieldVersion<Value>,
       _ client: FieldVersion<Value>
     ) -> Value
@@ -60,9 +61,12 @@
     /// Last-edit-wins merge policy that picks the edited value with the newer modification
     /// timestamp (ties favor the server).
     public static var latest: Self {
-      Self { _, server, client in
-        client.modificationTime > server.modificationTime ? client.value : server.value
-      }
+      Self(
+        merge: { _, server, client in
+          client.modificationTime > server.modificationTime ? client.value : server.value
+        },
+        reconcile: { _, _ in fatalError() }
+      )
     }
   }
 
@@ -70,11 +74,14 @@
     /// Counter merge policy that combines the independent increments and decrements from
     /// both edited values.
     public static var counter: Self {
-      Self { ancestor, server, client in
-        ancestor.value
-          + (server.value - ancestor.value)
-          + (client.value - ancestor.value)
-      }
+      Self(
+        merge: { ancestor, server, client in
+          ancestor.value
+            + (server.value - ancestor.value)
+            + (client.value - ancestor.value)
+        },
+        reconcile: { _, _ in fatalError() }
+      )
     }
   }
 
@@ -82,18 +89,21 @@
     /// Set merge policy that preserves elements not deleted on either side and adds new elements
     /// from both sides.
     public static var set: Self {
-      Self { ancestor, server, client in
-        let notDeleted = ancestor.value
-          .intersection(server.value)
-          .intersection(client.value)
+      Self(
+        merge: { ancestor, server, client in
+          let notDeleted = ancestor.value
+            .intersection(server.value)
+            .intersection(client.value)
 
-        let addedByServer = server.value.subtracting(ancestor.value)
-        let addedByClient = client.value.subtracting(ancestor.value)
+          let addedByServer = server.value.subtracting(ancestor.value)
+          let addedByClient = client.value.subtracting(ancestor.value)
 
-        return notDeleted
-          .union(addedByServer)
-          .union(addedByClient)
-      }
+          return notDeleted
+            .union(addedByServer)
+            .union(addedByClient)
+        },
+        reconcile: { _, _ in fatalError() }
+      )
     }
   }
 
