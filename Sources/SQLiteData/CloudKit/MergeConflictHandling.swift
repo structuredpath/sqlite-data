@@ -261,7 +261,10 @@
 
     /// Generates an UPDATE statement that resolves the merge conflict, using per-field policies
     /// from `CustomMergeConflictResolvable` when available, falling back to `.latest`.
-    package func makeUpdateQuery() -> QueryFragment {
+    ///
+    /// Returns `nil` when the table has no writable columns besides the primary key, in which
+    /// case there is nothing to resolve.
+    package func makeUpdateQuery() -> QueryFragment? {
       let assignments = T.TableColumns.writableColumns.compactMap { column in
         func open<Root, Value>(
           _ column: some WritableTableColumnExpression<Root, Value>
@@ -274,6 +277,7 @@
         }
         return open(column)
       }
+      guard !assignments.isEmpty else { return nil }
 
       return """
         UPDATE \(T.self)

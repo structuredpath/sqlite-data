@@ -2010,8 +2010,10 @@
                 client: clientVersion
               )
 
-              try $_currentZoneID.withValue(serverRecord.recordID.zoneID) {
-                try #sql(conflict.makeUpdateQuery()).execute(db)
+              if let updateQuery = conflict.makeUpdateQuery() {
+                try $_currentZoneID.withValue(serverRecord.recordID.zoneID) {
+                  try #sql(updateQuery).execute(db)
+                }
               }
             } else {
               try $_currentZoneID.withValue(serverRecord.recordID.zoneID) {
