@@ -1957,65 +1957,18 @@
           return
         }
 
-        let ancestorRecord = metadata._lastKnownServerRecordAllFields
-
-        let hasServerChanged: Bool = {
-          guard
-            let ancestorRecord,
-            let ancestorChangeTag = ancestorRecord.recordChangeTag,
-            let serverChangeTag = serverRecord.recordChangeTag
-          else {
-            // Without an ancestor, the server record is upserted as-is. In the unlikely edge
-            // case where a matching client row exists, it gets overwritten.
-            return true
-          }
-          return ancestorChangeTag != serverChangeTag
-        }()
-
-        // Skip re-delivered records unless force-upserting.
-        guard hasServerChanged || force else { return }
-
-        let hasClientChanged: Bool = {
-          // Without an ancestor, we can't detect client changes (no baseline to compare
-          // against). This effectively falls through to server wins.
-          guard let ancestorRecord else { return false }
-          return metadata.userModificationTime > ancestorRecord.userModificationTime
-        }()
-
-        let hasConflict = hasServerChanged && hasClientChanged
-
         func open<T>(_ table: some SynchronizableTable<T>) throws {
           do {
-            if
-              hasConflict && !force,
-              let ancestorRecord,
-              let row = try T.unscoped.find(#sql("\(bind: metadata.recordPrimaryKey)")).fetchOne(db)
-            {
-              let ancestorVersion = try RowVersion<T>(
-                from: ancestorRecord,
-                db: db
-              )
-              let serverVersion = try RowVersion<T>(
-                from: serverRecord,
-                db: db
-              )
-              let clientVersion = RowVersion<T>(
-                clientRow: T(queryOutput: row),
-                userModificationTime: metadata.userModificationTime,
-                ancestorVersion: ancestorVersion
-              )
-              let conflict = MergeConflict(
-                ancestor: ancestorVersion,
-                server: serverVersion,
-                client: clientVersion
-              )
-
-              if let updateQuery = conflict.makeUpdateQuery() {
-                try $_currentZoneID.withValue(serverRecord.recordID.zoneID) {
-                  try #sql(updateQuery).execute(db)
-                }
-              }
-            } else {
+            switch try actionForUpsert(
+              from: serverRecord,
+              in: table,
+              metadata: metadata,
+              force: force,
+              db: db
+            ) {
+            case .skip:
+              return
+            case .upsert:
               try $_currentZoneID.withValue(serverRecord.recordID.zoneID) {
                 try #sql(upsert(
                   table,
@@ -2024,15 +1977,20 @@
                 ))
                 .execute(db)
               }
-            }
+            case .resolve(let conflict):
+              if let updateQuery = conflict.makeUpdateQuery() {
+                try $_currentZoneID.withValue(serverRecord.recordID.zoneID) {
+                  try #sql(updateQuery).execute(db)
+                }
 
-            // Sets the record-level userModificationTime to the max of the client and server
-            // modification times, which effectively records the time at which the conflict
-            // resolution has happened. The resolved record is then stored as the new last-known
-            // server record, ensuring that per-field timestamps on the next upload reflect
-            // the resolution time rather than the server's original timestamps.
-            if hasConflict {
-              serverRecord.userModificationTime = metadata.userModificationTime
+                // Sets the record-level userModificationTime to the client's after an executed
+                // resolution, which effectively records the time at which the conflict
+                // resolution has happened. The resolved record is then stored as the new
+                // last-known server record, ensuring that per-field timestamps on the next
+                // upload reflect the resolution time rather than the server's original
+                // timestamps.
+                serverRecord.userModificationTime = metadata.userModificationTime
+              }
             }
 
             try UnsyncedRecordID
