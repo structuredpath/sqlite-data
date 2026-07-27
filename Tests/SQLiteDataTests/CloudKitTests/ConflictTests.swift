@@ -2066,6 +2066,65 @@
         }
       }
 
+      @Test func reconciliation_fetchBeforeSend_equalTimestamps() async throws {
+        // Step 1: Client creates Post @ t=60 (no prior sync)
+        try await withDependencies {
+          $0.currentTime.now = 60
+        } operation: {
+          try await userDatabase.userWrite { db in
+            try db.seed { Post(id: 1, title: "Hello from client") }
+          }
+        }
+
+        // Step 2: Server has Post @ t=60 (simulating another device)
+        let serverRecord = CKRecord(
+          recordType: Post.tableName,
+          recordID: Post.recordID(for: 1)
+        )
+        serverRecord.setValue(Int64(1), forKey: "id", at: 60)
+        serverRecord.setValue("Hello from server", forKey: "title", at: 60)
+        serverRecord.removeValue(forKey: "body", at: 60)
+        serverRecord.setValue(Int64(0), forKey: "isPublished", at: 60)
+        serverRecord.userModificationTime = 60
+        let fetchedRecordZoneChangesCallback = try syncEngine.modifyRecords(
+          scope: .private,
+          saving: [serverRecord]
+        )
+
+        // Step 3: Fetch arrives (conflict, no ancestor for merge)
+        await fetchedRecordZoneChangesCallback.notify()
+
+        // Step 4: Send (merged result)
+        try await syncEngine.processPendingRecordZoneChanges(scope: .private)
+
+        // Equal timestamps favor the server.
+        assertQuery(
+          Post.find(1)
+            .join(SyncMetadata.all) { $0.syncMetadataID.eq($1.id) }
+            .select {
+              SyncedRow<Post>.Columns(
+                row: $0,
+                userModificationTime: $1.userModificationTime
+              )
+            },
+          database: userDatabase.database
+        ) {
+          """
+          ┌─────────────────────────────────┐
+          │ SyncedRow(                      │
+          │   row: Post(                    │
+          │     id: 1,                      │
+          │     title: "Hello from server", │
+          │     body: nil,                  │
+          │     isPublished: false          │
+          │   ),                            │
+          │   userModificationTime: 60      │
+          │ )                               │
+          └─────────────────────────────────┘
+          """
+        }
+      }
+
       @Test func reconciliation_sendBeforeFetch_clientNewer() async throws {
         // Step 1: Server has Post @ t=30 (simulating another device)
         let serverRecord = CKRecord(
