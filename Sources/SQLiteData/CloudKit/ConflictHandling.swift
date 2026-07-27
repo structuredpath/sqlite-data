@@ -269,7 +269,10 @@
   /// A three-way merge conflict between an ancestor, server, and client version of a row.
   @available(iOS 16, macOS 13, tvOS 16, watchOS 9, *)
   package struct MergeConflict<T: PrimaryKeyedTable>: RowConflict
-  where T.TableColumns.PrimaryColumn: WritableTableColumnExpression {
+  where
+    T.PrimaryKey.QueryOutput: IdentifierStringConvertible,
+    T.TableColumns.PrimaryColumn: WritableTableColumnExpression
+  {
     package let ancestor: RowVersion<T>
     package let server: RowVersion<T>
     package let client: RowVersion<T>
@@ -279,6 +282,11 @@
       server: RowVersion<T>,
       client: RowVersion<T>
     ) {
+      precondition(
+        ancestor.row.primaryKey.rawIdentifier == client.row.primaryKey.rawIdentifier
+          && server.row.primaryKey.rawIdentifier == client.row.primaryKey.rawIdentifier,
+        "All versions of a merge conflict must describe the same row."
+      )
       self.ancestor = ancestor
       self.server = server
       self.client = client
@@ -349,7 +357,10 @@
   /// with the same primary key before ever synchronizing.
   @available(iOS 16, macOS 13, tvOS 16, watchOS 9, *)
   package struct ReconciliationConflict<T: PrimaryKeyedTable>: RowConflict
-  where T.TableColumns.PrimaryColumn: WritableTableColumnExpression {
+  where
+    T.PrimaryKey.QueryOutput: IdentifierStringConvertible,
+    T.TableColumns.PrimaryColumn: WritableTableColumnExpression
+  {
     package let server: RowVersion<T>
     package let client: RowVersion<T>
 
@@ -357,6 +368,10 @@
       server: RowVersion<T>,
       client: RowVersion<T>
     ) {
+      precondition(
+        server.row.primaryKey.rawIdentifier == client.row.primaryKey.rawIdentifier,
+        "Both versions of a reconciliation conflict must describe the same row."
+      )
       self.server = server
       self.client = client
     }
