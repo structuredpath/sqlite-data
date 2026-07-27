@@ -188,6 +188,109 @@
 
         #expect(conflict.makeUpdateQuery() == nil)
       }
+
+      // MARK: - ReconciliationConflict
+
+      @Test func reconciliationConflict_resolvedValues_canonicalConflict() {
+        let conflict = ReconciliationModel.makeCanonicalConflict()
+        let sentinel = FieldConflictPolicy<String> { _, _ in "sentinel" }
+
+        // Scenario 1: Equal values (timestamps irrelevant, short-circuits the policy)
+        #expect(conflict.resolvedValue(for: \.field1, policy: sentinel) == "foo")
+        // Scenario 2: Different values, server newer
+        #expect(conflict.resolvedValue(for: \.field2, policy: .latest) == "baz")
+        // Scenario 3: Different values, client newer
+        #expect(conflict.resolvedValue(for: \.field3, policy: .latest) == "bar")
+        // Scenario 4: Different values, equal timestamps (server wins)
+        #expect(conflict.resolvedValue(for: \.field4, policy: .latest) == "baz")
+      }
+
+      @Test func reconciliationConflict_resolutionRoundtrip_canonicalConflict() throws {
+        try userDatabase.write { db in
+          try #sql(
+            """
+            CREATE TABLE "reconciliationModels" (
+              "id" INTEGER PRIMARY KEY NOT NULL,
+              "field1" TEXT NOT NULL,
+              "field2" TEXT NOT NULL,
+              "field3" TEXT NOT NULL,
+              "field4" TEXT NOT NULL
+            )
+            """
+          ).execute(db)
+
+          let conflict = ReconciliationModel.makeCanonicalConflict()
+          try ReconciliationModel.insert { conflict.client.row }.execute(db)
+
+          let query = #sql(try #require(conflict.makeUpdateQuery()), as: Void.self)
+
+          assertInlineSnapshot(of: query, as: .sql) {
+            """
+            UPDATE "reconciliationModels"
+            SET "field1" = 'foo', "field2" = 'baz', "field3" = 'bar', "field4" = 'baz'
+            WHERE ("reconciliationModels"."id") = (0)
+            """
+          }
+
+          try query.execute(db)
+          let resolved = try ReconciliationModel.fetchOne(db)!
+
+          #expect(resolved == ReconciliationModel(
+            id: 0,
+            field1: "foo",
+            field2: "baz",
+            field3: "bar",
+            field4: "baz"
+          ))
+        }
+      }
+
+      @Test func reconciliationConflict_resolutionRoundtrip_customPolicies() throws {
+        typealias Post = Post_CustomConflictResolvable
+
+        try userDatabase.write { db in
+          try #sql(
+            """
+            CREATE TABLE "customPosts" (
+              "id" INTEGER PRIMARY KEY NOT NULL,
+              "title" TEXT NOT NULL DEFAULT '',
+              "likes" INTEGER NOT NULL DEFAULT 0,
+              "tags" TEXT NOT NULL DEFAULT '[]'
+            ) STRICT
+            """
+          ).execute(db)
+
+          let conflict = ReconciliationConflict(
+            server: RowVersion(
+              row: Post(id: 0, title: "Hello from server", likes: 13, tags: ["bar", "foo"]),
+              modificationTimes: [\.title: 60, \.likes: 30, \.tags: 60]
+            ),
+            client: RowVersion(
+              row: Post(id: 0, title: "Hello from client", likes: 12, tags: ["baz", "foo"]),
+              modificationTimes: [\.title: 30, \.likes: 60, \.tags: 30]
+            )
+          )
+
+          try Post.insert { conflict.client.row }.execute(db)
+
+          try #sql(#require(conflict.makeUpdateQuery())).execute(db)
+          let resolved = try Post.fetchOne(db)!
+
+          // `FieldConflictPolicy.latest` (default): "Hello from server" (server newer)
+          #expect(resolved.title == "Hello from server")
+          // `FieldConflictPolicy.counter`: last edit wins without an ancestor (client newer)
+          #expect(resolved.likes == 12)
+          // `FieldConflictPolicy.set`: union of both sides
+          #expect(resolved.tags == ["bar", "baz", "foo"])
+        }
+      }
+
+      @Test func reconciliationConflict_makeUpdateQuery_isNilForPrimaryKeyOnlyTables() {
+        let version = RowVersion(row: Tag(title: "Swift"), modificationTimes: [:])
+        let conflict = ReconciliationConflict(server: version, client: version)
+
+        #expect(conflict.makeUpdateQuery() == nil)
+      }
     }
   }
 
@@ -286,6 +389,54 @@
             \.field5: 60,
             \.field6: 60,
             \.field7: 30,
+          ]
+        )
+      )
+    }
+  }
+
+  @Table
+  private struct ReconciliationModel: Equatable {
+    let id: Int
+    var field1: String
+    var field2: String
+    var field3: String
+    var field4: String
+  }
+
+  extension ReconciliationModel {
+    /// Creates a two-way reconciliation conflict covering all four canonical reconciliation
+    /// scenarios.
+    fileprivate static func makeCanonicalConflict() -> ReconciliationConflict<Self> {
+      ReconciliationConflict(
+        server: RowVersion(
+          row: ReconciliationModel(
+            id: 0,
+            field1: "foo",
+            field2: "baz",
+            field3: "baz",
+            field4: "baz"
+          ),
+          modificationTimes: [
+            \.field1: 30,
+            \.field2: 60,
+            \.field3: 30,
+            \.field4: 60,
+          ]
+        ),
+        client: RowVersion(
+          row: ReconciliationModel(
+            id: 0,
+            field1: "foo",
+            field2: "bar",
+            field3: "bar",
+            field4: "bar"
+          ),
+          modificationTimes: [
+            \.field1: 60,
+            \.field2: 30,
+            \.field3: 60,
+            \.field4: 60,
           ]
         )
       )
