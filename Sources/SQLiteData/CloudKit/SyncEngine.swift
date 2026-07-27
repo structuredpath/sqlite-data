@@ -2062,6 +2062,82 @@
       }
     }
 
+    private enum ServerRecordUpsertAction<T: PrimaryKeyedTable>
+    where T.TableColumns.PrimaryColumn: WritableTableColumnExpression {
+      /// The record matches the last-known server record and there is nothing to apply.
+      case skip
+      /// The server-side change applies directly.
+      case upsert
+      /// Both sides hold conflicting state that must be resolved before applying.
+      case resolve(any RowConflict<T>)
+    }
+
+    private func actionForUpsert<T>(
+      from serverRecord: CKRecord,
+      in table: some SynchronizableTable<T>,
+      metadata: SyncMetadata,
+      force: Bool,
+      db: Database
+    ) throws -> ServerRecordUpsertAction<T> {
+      guard !force else { return .upsert }
+
+      func clientRow() throws -> T? {
+        guard let row = try T.unscoped
+          .find(#sql("\(bind: metadata.recordPrimaryKey)"))
+          .fetchOne(db)
+        else { return nil }
+        
+        return T(queryOutput: row)
+      }
+      
+      guard let ancestorRecord = metadata._lastKnownServerRecordAllFields else {
+        guard let clientRow = try clientRow() else { return .upsert }
+        
+        let clientVersion = RowVersion(
+          clientRow: clientRow,
+          userModificationTime: metadata.userModificationTime
+        )
+        let serverVersion = try RowVersion<T>(from: serverRecord, db: db)
+        
+        return .resolve(
+          ReconciliationConflict(
+            server: serverVersion,
+            client: clientVersion
+          )
+        )
+      }
+      
+      let hasServerChanged: Bool = {
+        guard
+          let ancestorChangeTag = ancestorRecord.recordChangeTag,
+          let serverChangeTag = serverRecord.recordChangeTag
+        else { return true }
+        return ancestorChangeTag != serverChangeTag
+      }()
+      guard hasServerChanged else { return .skip }
+      
+      let hasClientChanged = metadata.userModificationTime > ancestorRecord.userModificationTime
+      guard hasClientChanged else { return .upsert }
+      
+      guard let clientRow = try clientRow() else { return .upsert }
+
+      let ancestorVersion = try RowVersion<T>(from: ancestorRecord, db: db)
+      let serverVersion = try RowVersion<T>(from: serverRecord, db: db)
+      let clientVersion = RowVersion(
+        clientRow: clientRow,
+        userModificationTime: metadata.userModificationTime,
+        ancestorVersion: ancestorVersion
+      )
+
+      return .resolve(
+        MergeConflict(
+          ancestor: ancestorVersion,
+          server: serverVersion,
+          client: clientVersion
+        )
+      )
+    }
+
     private func refreshLastKnownServerRecord(_ record: CKRecord) async {
       await withErrorReporting(.sqliteDataCloudKitFailure) {
         try await userDatabase.write { db in
