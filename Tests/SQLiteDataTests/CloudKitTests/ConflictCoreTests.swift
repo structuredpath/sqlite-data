@@ -52,6 +52,19 @@
         #expect(client.modificationTime(for: \.isPublished) == 0)
       }
 
+      @Test func rowVersion_initClientRow_withoutAncestor() {
+        let client = RowVersion(
+          clientRow: Post(id: 1, title: "My Post"),
+          userModificationTime: 60
+        )
+
+        // Every writable column carries the row-level time
+        #expect(client.modificationTime(for: \.id) == 60)
+        #expect(client.modificationTime(for: \.title) == 60)
+        #expect(client.modificationTime(for: \.body) == 60)
+        #expect(client.modificationTime(for: \.isPublished) == 60)
+      }
+
       @Test func rowVersion_initFromRecord() throws {
         let record = CKRecord(recordType: "posts")
         record.setValue(1, forKey: "id", at: 0)
