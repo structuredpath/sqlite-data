@@ -423,6 +423,27 @@
       self.modificationTimes = modificationTimes
     }
     
+    /// Creates a client row version without an ancestor by applying the row-level
+    /// modification time to every writable column. Used for two-way reconciliation when
+    /// no shared baseline exists.
+    package init(
+      clientRow row: T,
+      userModificationTime: Int64
+    ) {
+      var modificationTimes: [PartialKeyPath<T>: Int64] = [:]
+      for column in T.TableColumns.writableColumns {
+        func open<Root, Value>(_ column: some WritableTableColumnExpression<Root, Value>) {
+          modificationTimes[column.keyPath as! PartialKeyPath<T>] = userModificationTime
+        }
+        open(column)
+      }
+
+      self.init(
+        row: row,
+        modificationTimes: modificationTimes
+      )
+    }
+
     /// Creates a client row version by deriving per-field modification timestamps from the
     /// ancestor: changed fields get the client's modification time, unchanged fields inherit
     /// the ancestor's timestamp.
