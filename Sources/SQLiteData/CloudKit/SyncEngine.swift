@@ -1961,14 +1961,14 @@
           do {
             switch try actionForUpsert(
               from: serverRecord,
-              in: table,
+              table: table,
               metadata: metadata,
               force: force,
               db: db
             ) {
             case .skip:
               return
-            case .upsert:
+            case .apply:
               try $_currentZoneID.withValue(serverRecord.recordID.zoneID) {
                 try #sql(upsert(
                   table,
@@ -2025,19 +2025,19 @@
       /// The record matches the last-known server record and there is nothing to apply.
       case skip
       /// The server-side change applies directly.
-      case upsert
+      case apply
       /// Both sides hold conflicting state that must be resolved before applying.
       case resolve(any RowConflict<T>)
     }
 
     private func actionForUpsert<T>(
       from serverRecord: CKRecord,
-      in table: some SynchronizableTable<T>,
+      table: some SynchronizableTable<T>,
       metadata: SyncMetadata,
       force: Bool,
       db: Database
     ) throws -> ServerRecordUpsertAction<T> {
-      guard !force else { return .upsert }
+      guard !force else { return .apply }
 
       func clientRow() throws -> T? {
         guard let row = try T.unscoped
@@ -2049,7 +2049,7 @@
       }
       
       guard let ancestorRecord = metadata._lastKnownServerRecordAllFields else {
-        guard let clientRow = try clientRow() else { return .upsert }
+        guard let clientRow = try clientRow() else { return .apply }
         
         let clientVersion = RowVersion(
           clientRow: clientRow,
@@ -2075,9 +2075,9 @@
       guard hasServerChanged else { return .skip }
       
       let hasClientChanged = metadata.userModificationTime > ancestorRecord.userModificationTime
-      guard hasClientChanged else { return .upsert }
+      guard hasClientChanged else { return .apply }
       
-      guard let clientRow = try clientRow() else { return .upsert }
+      guard let clientRow = try clientRow() else { return .apply }
 
       let ancestorVersion = try RowVersion<T>(from: ancestorRecord, db: db)
       let serverVersion = try RowVersion<T>(from: serverRecord, db: db)
