@@ -1,8 +1,11 @@
 #if canImport(CloudKit)
   package import CloudKit
   import CustomDump
+  import Dependencies
+  package import GRDB
   import IssueReporting
-  import StructuredQueriesCore
+  import StructuredQueries
+  public import StructuredQueriesCore
 
   public protocol CustomConflictResolvable: PrimaryKeyedTable
     where TableColumns.PrimaryColumn: WritableTableColumnExpression
