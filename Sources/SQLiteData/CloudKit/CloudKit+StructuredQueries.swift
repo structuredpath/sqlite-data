@@ -3,6 +3,7 @@
   import CryptoKit
   import Dependencies
   import IssueReporting
+  import OrderedCollections
   public import StructuredQueriesCore
 
   extension CKRecord {
@@ -306,65 +307,80 @@
     }
 
     func update<T: PrimaryKeyedTable>(
-      with other: CKRecord,
-      row: T,
-      userModificationTime: Int64,
-      columnNames: inout [String],
+      with lastKnownServerRecord: CKRecord,
+      clientRow: T,
+      clientUserModificationTime: Int64,
+      columnNamesToUpsert: inout OrderedSet<String>,
       parentForeignKey: ForeignKey?
     ) {
       typealias EquatableCKRecordValueProtocol = CKRecordValueProtocol & Equatable
 
-      self.userModificationTime = other.userModificationTime
+      self.userModificationTime = lastKnownServerRecord.userModificationTime
       for column in T.TableColumns.writableColumns {
         func open<Root, Value>(_ column: some WritableTableColumnExpression<Root, Value>) {
           let key = column.name
           let keyPath = column.keyPath as! KeyPath<T, Value.QueryOutput>
-          let didSet: Bool
-          if let value = other[key] as? CKAsset {
-            didSet = setAsset(value, forKey: key, at: other.encryptedValues[at: key])
-          } else if let value = other.encryptedValues[key] as? any EquatableCKRecordValueProtocol {
-            didSet = setValue(value, forKey: key, at: other.encryptedValues[at: key])
-          } else if other.encryptedValues[key] == nil {
-            didSet = removeValue(forKey: key, at: other.encryptedValues[at: key])
+          let lastKnownServerValueModificationTime = lastKnownServerRecord.encryptedValues[at: key]
+          let didSetLastKnownServerValue: Bool
+          if let value = lastKnownServerRecord[key] as? CKAsset {
+            didSetLastKnownServerValue = setAsset(
+              value,
+              forKey: key,
+              at: lastKnownServerValueModificationTime
+            )
+          } else if let value = lastKnownServerRecord.encryptedValues[key]
+            as? any EquatableCKRecordValueProtocol
+          {
+            didSetLastKnownServerValue = setValue(
+              value,
+              forKey: key,
+              at: lastKnownServerValueModificationTime
+            )
+          } else if lastKnownServerRecord.encryptedValues[key] == nil {
+            didSetLastKnownServerValue = removeValue(
+              forKey: key,
+              at: lastKnownServerValueModificationTime
+            )
           } else {
-            didSet = false
+            didSetLastKnownServerValue = false
           }
-          /// The row value has been modified more recently than the last known record.
-          var isRowValueModified: Bool {
-            switch Value(queryOutput: row[keyPath: keyPath]).queryBinding {
+          var hasClientValueChanged: Bool {
+            switch Value(queryOutput: clientRow[keyPath: keyPath]).queryBinding {
             case .blob(let value):
-              return other.encryptedValues[hash: key] != value.sha256
+              return lastKnownServerRecord.encryptedValues[hash: key] != value.sha256
             case .bool(let value):
-              return other.encryptedValues[key] != value
+              return lastKnownServerRecord.encryptedValues[key] != value
             case .double(let value):
-              return other.encryptedValues[key] != value
+              return lastKnownServerRecord.encryptedValues[key] != value
             case .date(let value):
-              return other.encryptedValues[key] != value
+              return lastKnownServerRecord.encryptedValues[key] != value
             case .int(let value):
-              return other.encryptedValues[key] != value
+              return lastKnownServerRecord.encryptedValues[key] != value
             case .null:
-              return other.encryptedValues[key] != nil
+              return lastKnownServerRecord.encryptedValues[key] != nil
             case .text(let value):
-              return other.encryptedValues[key] != value
+              return lastKnownServerRecord.encryptedValues[key] != value
             case .uint(let value):
-              return other.encryptedValues[key] != value
+              return lastKnownServerRecord.encryptedValues[key] != value
             case .uuid(let value):
-              return other.encryptedValues[key] != value.uuidString.lowercased()
+              return lastKnownServerRecord.encryptedValues[key] != value.uuidString.lowercased()
             case .invalid(let error):
               reportIssue(error)
               return false
             }
           }
-          if didSet {
-            columnNames.removeAll(where: { $0 == key })
+          if didSetLastKnownServerValue {
+            columnNamesToUpsert.remove(key)
             if let parentForeignKey, key == parentForeignKey.from {
-              self.parent = other.parent
+              self.parent = lastKnownServerRecord.parent
             }
-          } else if isRowValueModified {
-            let hasServerValueChanged = encryptedValues[at: key] > other.encryptedValues[at: key]
-            let isRowValueNewer = userModificationTime >= encryptedValues[at: key]
-            if !hasServerValueChanged || isRowValueNewer {
-              columnNames.removeAll(where: { $0 == key })
+          } else if hasClientValueChanged {
+            let serverValueModificationTime = encryptedValues[at: key]
+            let hasServerValueChanged =
+              serverValueModificationTime > lastKnownServerValueModificationTime
+            let isClientValueNewer = clientUserModificationTime >= serverValueModificationTime
+            if !hasServerValueChanged || isClientValueNewer {
+              columnNamesToUpsert.remove(key)
             }
           }
         }
