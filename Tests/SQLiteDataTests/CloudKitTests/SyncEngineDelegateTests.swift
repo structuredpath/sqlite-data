@@ -323,38 +323,26 @@
         }
         assertQuery(SyncMetadata.all, database: syncEngine.metadatabase) {
           """
-          ┌────────────────────────────────────────────────────────────────────┐
-          │ SyncMetadata(                                                      │
-          │   id: SyncMetadata.ID(                                             │
-          │     recordPrimaryKey: "1",                                         │
-          │     recordType: "remindersLists"                                   │
-          │   ),                                                               │
-          │   zoneName: "zone",                                                │
-          │   ownerName: "__defaultOwner__",                                   │
-          │   recordName: "1:remindersLists",                                  │
-          │   parentRecordID: nil,                                             │
-          │   parentRecordName: nil,                                           │
-          │   lastKnownServerRecord: CKRecord(                                 │
-          │     recordID: CKRecord.ID(1:remindersLists/zone/__defaultOwner__), │
-          │     recordType: "remindersLists",                                  │
-          │     parent: nil,                                                   │
-          │     share: nil                                                     │
-          │   ),                                                               │
-          │   _lastKnownServerRecordAllFields: CKRecord(                       │
-          │     recordID: CKRecord.ID(1:remindersLists/zone/__defaultOwner__), │
-          │     recordType: "remindersLists",                                  │
-          │     parent: nil,                                                   │
-          │     share: nil,                                                    │
-          │     id: 1,                                                         │
-          │     title: "Personal"                                              │
-          │   ),                                                               │
-          │   share: nil,                                                      │
-          │   _isDeleted: false,                                               │
-          │   _hasLastKnownServerRecord: true,                                 │
-          │   _isShared: false,                                                │
-          │   userModificationTime: 0                                          │
-          │ )                                                                  │
-          └────────────────────────────────────────────────────────────────────┘
+          ┌─────────────────────────────────────────┐
+          │ SyncMetadata(                           │
+          │   id: SyncMetadata.ID(                  │
+          │     recordPrimaryKey: "1",              │
+          │     recordType: "remindersLists"        │
+          │   ),                                    │
+          │   zoneName: "zone",                     │
+          │   ownerName: "__defaultOwner__",        │
+          │   recordName: "1:remindersLists",       │
+          │   parentRecordID: nil,                  │
+          │   parentRecordName: nil,                │
+          │   lastKnownServerRecord: nil,           │
+          │   _lastKnownServerRecordAllFields: nil, │
+          │   share: nil,                           │
+          │   _isDeleted: false,                    │
+          │   _hasLastKnownServerRecord: false,     │
+          │   _isShared: false,                     │
+          │   userModificationTime: 0               │
+          │ )                                       │
+          └─────────────────────────────────────────┘
           """
         }
         assertInlineSnapshot(of: container, as: .customDump) {
@@ -472,38 +460,26 @@
         }
         assertQuery(SyncMetadata.all, database: syncEngine.metadatabase) {
           """
-          ┌────────────────────────────────────────────────────────────────────┐
-          │ SyncMetadata(                                                      │
-          │   id: SyncMetadata.ID(                                             │
-          │     recordPrimaryKey: "1",                                         │
-          │     recordType: "remindersLists"                                   │
-          │   ),                                                               │
-          │   zoneName: "zone",                                                │
-          │   ownerName: "__defaultOwner__",                                   │
-          │   recordName: "1:remindersLists",                                  │
-          │   parentRecordID: nil,                                             │
-          │   parentRecordName: nil,                                           │
-          │   lastKnownServerRecord: CKRecord(                                 │
-          │     recordID: CKRecord.ID(1:remindersLists/zone/__defaultOwner__), │
-          │     recordType: "remindersLists",                                  │
-          │     parent: nil,                                                   │
-          │     share: nil                                                     │
-          │   ),                                                               │
-          │   _lastKnownServerRecordAllFields: CKRecord(                       │
-          │     recordID: CKRecord.ID(1:remindersLists/zone/__defaultOwner__), │
-          │     recordType: "remindersLists",                                  │
-          │     parent: nil,                                                   │
-          │     share: nil,                                                    │
-          │     id: 1,                                                         │
-          │     title: "Personal"                                              │
-          │   ),                                                               │
-          │   share: nil,                                                      │
-          │   _isDeleted: false,                                               │
-          │   _hasLastKnownServerRecord: true,                                 │
-          │   _isShared: false,                                                │
-          │   userModificationTime: 0                                          │
-          │ )                                                                  │
-          └────────────────────────────────────────────────────────────────────┘
+          ┌─────────────────────────────────────────┐
+          │ SyncMetadata(                           │
+          │   id: SyncMetadata.ID(                  │
+          │     recordPrimaryKey: "1",              │
+          │     recordType: "remindersLists"        │
+          │   ),                                    │
+          │   zoneName: "zone",                     │
+          │   ownerName: "__defaultOwner__",        │
+          │   recordName: "1:remindersLists",       │
+          │   parentRecordID: nil,                  │
+          │   parentRecordName: nil,                │
+          │   lastKnownServerRecord: nil,           │
+          │   _lastKnownServerRecordAllFields: nil, │
+          │   share: nil,                           │
+          │   _isDeleted: false,                    │
+          │   _hasLastKnownServerRecord: false,     │
+          │   _isShared: false,                     │
+          │   userModificationTime: 0               │
+          │ )                                       │
+          └─────────────────────────────────────────┘
           """
         }
         assertInlineSnapshot(of: container, as: .customDump) {
